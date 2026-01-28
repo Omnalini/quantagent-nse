@@ -1,5 +1,6 @@
 from flask import Flask, jsonify, request
 from flask_cors import CORS
+from flask import render_template
 
 from utils.data_loader import load_stock_data
 from agents.indicator_agent import indicator_agent
@@ -18,6 +19,9 @@ DATA_FOLDER = "data"
 def home():
     return jsonify({"message": "Stock Advisory Backend is running"})
 
+@app.route("/ui")
+def ui():
+    return render_template("index.html")
 
 @app.route("/analyze", methods=["POST"])
 def analyze_stock():

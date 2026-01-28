@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Stock Advisory System</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+    <div class="container">
+        <h1>📈 Stock Advisory System</h1>
+
+        <div class="input-box">
+            <label>Select Stock</label>
+            <select id="stock">
+                <option value="RELIANCE">RELIANCE</option>
+                <option value="TCS">TCS</option>
+                <option value="INFY">INFY</option>
+                <option value="HDFCBANK">HDFCBANK</option>
+            </select>
+
+            <button onclick="analyzeStock()">Analyze</button>
+        </div>
+
+        <div id="loading" class="hidden">Analyzing...</div>
+
+        <div id="result" class="hidden">
+            <h2>Analysis Result</h2>
+
+            <div class="card">
+                <h3>Final Decision</h3>
+                <p id="decision"></p>
+                <p id="reason"></p>
+            </div>
+
+            <div class="card">
+                <h3>Indicators</h3>
+                <p id="indicators"></p>
+            </div>
+
+            <div class="card">
+                <h3>Trend</h3>
+                <p id="trend"></p>
+            </div>
+
+            <div class="card">
+                <h3>Pattern</h3>
+                <p id="pattern"></p>
+            </div>
+
+            <div class="card">
+                <h3>Risk Management</h3>
+                <p id="risk"></p>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/script.js"></script>
+</body>
+</html>

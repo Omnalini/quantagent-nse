@@ -17,6 +17,12 @@
                 <option value="TCS">TCS</option>
                 <option value="INFY">INFY</option>
                 <option value="HDFCBANK">HDFCBANK</option>
+                <option value="ICICIBANK">ICICIBANK</option>
+                <option value="SBIN">SBIN</option>
+                <option value="ITC">ITC</option>
+                <option value="LT">LT</option>
+                <option value="HINDUNILVR">HINDUNILVR</option>
+                <option value="BAJFINANCE">BAJFINANCE</option>
             </select>
 
             <button onclick="analyzeStock()">Analyze</button>
@@ -25,34 +31,32 @@
         <div id="loading" class="hidden">Analyzing...</div>
 
         <div id="result" class="hidden">
-            <h2>Analysis Result</h2>
-
-            <div class="card">
+            <div class="section">
                 <h3>Final Decision</h3>
-                <p id="decision"></p>
+                <div id="decision" class="decision-box"></div>
                 <p id="reason"></p>
             </div>
-
-            <div class="card">
+        
+            <div class="section">
                 <h3>Indicators</h3>
-                <p id="indicators"></p>
+                <pre id="indicators"></pre>
             </div>
-
-            <div class="card">
+        
+            <div class="section">
                 <h3>Trend</h3>
-                <p id="trend"></p>
+                <pre id="trend"></pre>
             </div>
-
-            <div class="card">
+        
+            <div class="section">
                 <h3>Pattern</h3>
-                <p id="pattern"></p>
+                <pre id="pattern"></pre>
             </div>
-
-            <div class="card">
+        
+            <div class="section">
                 <h3>Risk Management</h3>
-                <p id="risk"></p>
+                <pre id="risk"></pre>
             </div>
-        </div>
+        </div>        
     </div>
 
     <script src="/static/script.js"></script>

@@ -1,46 +1,83 @@
 body {
-    font-family: Arial, sans-serif;
-    background: #f4f6f8;
+    font-family: "Segoe UI", Arial, sans-serif;
+    background: #f2f4f7;
+    margin: 0;
 }
 
 .container {
-    width: 800px;
+    max-width: 900px;
     margin: auto;
-    padding: 20px;
+    padding: 30px;
 }
 
 h1 {
     text-align: center;
+    margin-bottom: 30px;
 }
 
 .input-box {
-    text-align: center;
-    margin-bottom: 20px;
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+    margin-bottom: 30px;
 }
 
 select, button {
-    padding: 10px;
-    margin: 5px;
+    padding: 10px 14px;
+    font-size: 15px;
 }
 
 button {
-    background: #007bff;
+    background: #2563eb;
     color: white;
     border: none;
+    border-radius: 4px;
     cursor: pointer;
 }
 
 button:hover {
-    background: #0056b3;
+    background: #1e40af;
 }
 
-.card {
+.section {
     background: white;
-    padding: 15px;
-    margin: 10px 0;
-    border-radius: 5px;
+    padding: 18px;
+    margin-bottom: 18px;
+    border-radius: 6px;
+}
+
+.section h3 {
+    margin-top: 0;
+}
+
+.decision-box {
+    font-size: 22px;
+    font-weight: bold;
+}
+
+.buy {
+    color: green;
+}
+
+.sell {
+    color: red;
+}
+
+.hold {
+    color: #ca8a04;
+}
+
+.label {
+    font-weight: bold;
 }
 
 .hidden {
     display: none;
+}
+
+pre {
+    background: #f8fafc;
+    padding: 10px;
+    border-radius: 4px;
+    overflow-x: auto;
 }

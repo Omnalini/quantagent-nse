@@ -15,25 +15,32 @@ function analyzeStock() {
     .then(data => {
         document.getElementById("loading").classList.add("hidden");
         document.getElementById("result").classList.remove("hidden");
-
-        document.getElementById("decision").innerText =
-            data.final_decision.decision;
-
+    
+        const decision = data.final_decision.decision;
+    
+        const decisionEl = document.getElementById("decision");
+        decisionEl.innerText = decision;
+    
+        decisionEl.className = "decision-box " + decision.toLowerCase();
+    
         document.getElementById("reason").innerText =
             data.final_decision.reason.join(", ");
-
+    
         document.getElementById("indicators").innerText =
             JSON.stringify(data.indicator, null, 2);
-
+    
         document.getElementById("trend").innerText =
             JSON.stringify(data.trend, null, 2);
-
+    
         document.getElementById("pattern").innerText =
             JSON.stringify(data.pattern, null, 2);
-
+    
         document.getElementById("risk").innerText =
-            JSON.stringify(data.final_decision.risk, null, 2);
+            data.final_decision.risk
+                ? JSON.stringify(data.final_decision.risk, null, 2)
+                : "Not applicable (HOLD decision)";
     })
+    
     .catch(error => {
         alert("Error fetching data");
         console.error(error);

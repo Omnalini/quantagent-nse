@@ -2,61 +2,77 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Stock Advisory System</title>
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-
     <div class="container">
-        <h1>📈 Stock Advisory System</h1>
+        <header class="header">
+            <h1>📈 Stock Advisory System</h1>
+            <p class="subtitle">Multi-Agent Analysis for Smarter Investment Decisions</p>
+        </header>
 
         <div class="input-box">
-            <label>Select Stock</label>
-            <select id="stock">
-                <option value="RELIANCE">RELIANCE</option>
-                <option value="TCS">TCS</option>
-                <option value="INFY">INFY</option>
-                <option value="HDFCBANK">HDFCBANK</option>
-                <option value="ICICIBANK">ICICIBANK</option>
-                <option value="SBIN">SBIN</option>
-                <option value="ITC">ITC</option>
-                <option value="LT">LT</option>
-                <option value="HINDUNILVR">HINDUNILVR</option>
-                <option value="BAJFINANCE">BAJFINANCE</option>
-            </select>
-
-            <button onclick="analyzeStock()">Analyze</button>
+            <div class="input-group">
+                <label for="stock">Select Stock</label>
+                <select id="stock">
+                    <option value="RELIANCE">RELIANCE</option>
+                    <option value="TCS">TCS</option>
+                    <option value="INFY">INFY</option>
+                    <option value="HDFCBANK">HDFCBANK</option>
+                    <option value="ICICIBANK">ICICIBANK</option>
+                    <option value="SBIN">SBIN</option>
+                    <option value="ITC">ITC</option>
+                    <option value="LT">LT</option>
+                    <option value="HINDUNILVR">HINDUNILVR</option>
+                    <option value="BAJFINANCE">BAJFINANCE</option>
+                </select>
+            </div>
+            <button id="analyzeBtn" onclick="analyzeStock()">
+                <span class="btn-text">Analyze Stock</span>
+                <span class="btn-icon">→</span>
+            </button>
         </div>
 
-        <div id="loading" class="hidden">Analyzing...</div>
+        <div id="loading" class="loading hidden">
+            <div class="spinner"></div>
+            <span>Analyzing stock data...</span>
+        </div>
 
-        <div id="result" class="hidden">
-            <div class="section">
+        <div id="result" class="result hidden">
+            <div class="section decision-section">
                 <h3>Final Decision</h3>
                 <div id="decision" class="decision-box"></div>
-                <p id="reason"></p>
+                <p id="reason" class="reason-text"></p>
             </div>
-        
-            <div class="section">
-                <h3>Indicators</h3>
-                <pre id="indicators"></pre>
+
+            <div class="grid-layout">
+                <div class="section">
+                    <h3>📊 Indicators</h3>
+                    <pre id="indicators"></pre>
+                </div>
+
+                <div class="section">
+                    <h3>📈 Trend Analysis</h3>
+                    <pre id="trend"></pre>
+                </div>
+
+                <div class="section">
+                    <h3>🔍 Pattern Detection</h3>
+                    <pre id="pattern"></pre>
+                </div>
+
+                <div class="section">
+                    <h3>⚠️ Risk Management</h3>
+                    <pre id="risk"></pre>
+                </div>
             </div>
-        
-            <div class="section">
-                <h3>Trend</h3>
-                <pre id="trend"></pre>
-            </div>
-        
-            <div class="section">
-                <h3>Pattern</h3>
-                <pre id="pattern"></pre>
-            </div>
-        
-            <div class="section">
-                <h3>Risk Management</h3>
-                <pre id="risk"></pre>
-            </div>
-        </div>        
+        </div>
+
+        <footer class="footer">
+            <p>Disclaimer: This is an advisory system only. Not financial advice.</p>
+        </footer>
     </div>
 
     <script src="/static/script.js"></script>

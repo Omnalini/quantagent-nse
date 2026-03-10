@@ -11,7 +11,7 @@ def indicator_agent(df):
     data["MACD"] = macd["MACD_12_26_9"]
     data["MACD_SIGNAL"] = macd["MACDs_12_26_9"]
 
-    # ✅ SAFE SMAs (NO pandas_ta)
+    # SAFE SMAs (NO pandas_ta)
     data["SMA_50"] = data["Close"].rolling(window=50).mean()
     data["SMA_200"] = data["Close"].rolling(window=200).mean()
 

@@ -1,11 +1,3 @@
-/* ==========================================
-   STOCK ADVISORY SYSTEM - JAVASCRIPT
-   ========================================== */
-
-/**
- * Analyzes the selected stock by sending a request to the backend API
- * and displays the results in the UI.
- */
 function analyzeStock() {
     const stock = document.getElementById("stock").value;
     const loadingEl = document.getElementById("loading");

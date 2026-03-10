@@ -13,7 +13,7 @@ def decision_agent(indicator, trend, pattern, current_price):
     decision = "HOLD"
     reason = []
 
-    # ---- BUY CONDITIONS ----
+    # BUY CONDITIONS 
     if (
         trend_dir == "uptrend"
         and macd_signal == "bullish"
@@ -25,7 +25,7 @@ def decision_agent(indicator, trend, pattern, current_price):
         reason.append("Bullish MACD")
         reason.append(f"Bullish pattern: {pattern_type}")
 
-    # ---- SELL CONDITIONS ----
+    # SELL CONDITIONS 
     elif (
         trend_dir == "downtrend"
         and macd_signal == "bearish"
@@ -40,7 +40,7 @@ def decision_agent(indicator, trend, pattern, current_price):
     else:
         reason.append("Signals are mixed or weak")
 
-    # ---- RISK MANAGEMENT ----
+    # RISK MANAGEMENT 
     risk = None
     if decision in ["BUY", "SELL"]:
         risk = risk_agent(current_price, decision)

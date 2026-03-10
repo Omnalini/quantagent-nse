@@ -20,14 +20,14 @@ def trend_agent(df, lookback=60):
     # Latest values
     latest = data.iloc[-1]
 
-    # ---- SLOPE CALCULATION ----
+    # SLOPE CALCULATION 
     recent_prices = data["Close"].tail(lookback).values
     x = np.arange(len(recent_prices))
 
     # Linear regression slope
     slope = np.polyfit(x, recent_prices, 1)[0]
 
-    # ---- TREND LOGIC ----
+    # TREND LOGIC 
     if latest["SMA_50"] > latest["SMA_200"] and slope > 0:
         trend = "uptrend"
     elif latest["SMA_50"] < latest["SMA_200"] and slope < 0:

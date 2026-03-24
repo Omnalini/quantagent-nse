@@ -1,1305 +1,615 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>QuantAgent — Multi-Agent HFT System</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>QuantAgent — Nifty 50</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <style>
-:root {
-  --bg: #090c14;
-  --bg2: #0e1422;
-  --bg3: #141929;
-  --card: #111827;
-  --border: #1e2d45;
-  --text: #e2e8f0;
-  --muted: #64748b;
-  --accent: #3b82f6;
-  --accent2: #06b6d4;
-  --green: #10b981;
-  --red: #ef4444;
-  --yellow: #f59e0b;
-  --purple: #8b5cf6;
-  --long-color: #10b981;
-  --short-color: #ef4444;
-  --font-mono: 'Space Mono', monospace;
-  --font-sans: 'Inter', sans-serif;
-  --glow-green: 0 0 20px rgba(16,185,129,0.3);
-  --glow-red: 0 0 20px rgba(239,68,68,0.3);
-  --glow-blue: 0 0 20px rgba(59,130,246,0.2);
+/* ── Reset & base ───────────────────────────────────────────────────── */
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#090c14; --card:#111827; --border:#1f2937;
+  --text:#e5e7eb; --muted:#6b7280; --accent:#3b82f6;
+  --green:#22c55e; --red:#ef4444; --yellow:#f59e0b;
+  --font:'Space Mono',monospace;
 }
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body{background:var(--bg);color:var(--text);font-family:var(--font);
+     font-size:13px;min-height:100vh;display:flex;flex-direction:column}
 
-body {
-  background: var(--bg);
-  color: var(--text);
-  font-family: var(--font-sans);
-  font-size: 13px;
-  line-height: 1.5;
-  overflow-x: hidden;
-}
+/* ── Layout ─────────────────────────────────────────────────────────── */
+header{display:flex;align-items:center;gap:12px;padding:12px 20px;
+       border-bottom:1px solid var(--border);background:var(--card)}
+header h1{font-size:16px;font-weight:700;letter-spacing:.5px}
+.badge{font-size:10px;padding:2px 8px;border-radius:99px;
+       background:#1a2e1a;color:var(--green);border:1px solid var(--green)}
+.badge.closed{background:#2a1a1a;color:var(--red);border-color:var(--red)}
 
-/* ── Layout ── */
-.layout { display: grid; grid-template-columns: 260px 1fr; grid-template-rows: 56px 1fr; min-height: 100vh; }
+.layout{display:grid;grid-template-columns:260px 1fr;flex:1;overflow:hidden}
+aside{border-right:1px solid var(--border);padding:14px;overflow-y:auto;
+      display:flex;flex-direction:column;gap:14px}
+main{padding:16px;overflow-y:auto;display:flex;flex-direction:column;gap:14px}
 
-/* ── Header ── */
-header {
-  grid-column: 1 / -1;
-  display: flex; align-items: center; gap: 16px;
-  padding: 0 20px;
-  background: var(--bg2);
-  border-bottom: 1px solid var(--border);
-  z-index: 10;
-}
-.logo {
-  display: flex; align-items: center; gap: 10px;
-  font-family: var(--font-mono); font-size: 15px; font-weight: 700;
-  color: var(--accent2);
-}
-.logo-icon { width: 28px; height: 28px; background: linear-gradient(135deg, #3b82f6, #06b6d4); border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 16px; }
-.header-right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
-.live-badge { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--green); font-family: var(--font-mono); }
-.live-dot { width: 7px; height: 7px; background: var(--green); border-radius: 50%; animation: pulse 1.5s infinite; }
-@keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.6;transform:scale(1.3)} }
+/* ── Cards ──────────────────────────────────────────────────────────── */
+.card{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:14px}
+.card-title{font-size:10px;text-transform:uppercase;letter-spacing:1px;
+            color:var(--muted);margin-bottom:10px}
 
-/* ── Sidebar ── */
-aside {
-  background: var(--bg2);
-  border-right: 1px solid var(--border);
-  padding: 16px;
-  display: flex; flex-direction: column; gap: 12px;
-  overflow-y: auto;
-}
+/* ── Form controls ──────────────────────────────────────────────────── */
+select,input[type=text],input[type=password]{
+  width:100%;background:#0d1117;border:1px solid var(--border);
+  color:var(--text);border-radius:6px;padding:7px 10px;
+  font-family:var(--font);font-size:12px;outline:none}
+select:focus,input:focus{border-color:var(--accent)}
+label{font-size:11px;color:var(--muted);display:block;margin-bottom:4px}
 
-.sidebar-section { display: flex; flex-direction: column; gap: 6px; }
-.sidebar-label { font-size: 10px; font-family: var(--font-mono); color: var(--muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 2px; }
+button{background:var(--accent);color:#fff;border:none;border-radius:6px;
+       padding:8px 14px;cursor:pointer;font-family:var(--font);
+       font-size:12px;width:100%;transition:.15s}
+button:hover{filter:brightness(1.15)}
+button.secondary{background:#1f2937;color:var(--text);border:1px solid var(--border)}
+button:disabled{opacity:.45;cursor:not-allowed}
 
-select, input[type=text], input[type=number] {
-  width: 100%; padding: 8px 10px;
-  background: var(--bg3); border: 1px solid var(--border); border-radius: 6px;
-  color: var(--text); font-family: var(--font-sans); font-size: 12px;
-  outline: none; transition: border-color .2s;
-}
-select:focus, input:focus { border-color: var(--accent); }
-select option { background: var(--bg3); }
+/* ── Decision banner ─────────────────────────────────────────────────── */
+#decision-banner{border-radius:8px;padding:18px 20px;
+                 display:flex;align-items:center;gap:16px;
+                 border:1px solid var(--border)}
+#decision-banner.long{background:#0d1f0d;border-color:var(--green)}
+#decision-banner.short{background:#1f0d0d;border-color:var(--red)}
+.dir-badge{font-size:28px;font-weight:700;letter-spacing:2px;min-width:90px}
+.dir-badge.long{color:var(--green)} .dir-badge.short{color:var(--red)}
+.decision-meta{flex:1}
+.decision-meta .horizon{font-size:11px;color:var(--muted);margin-bottom:4px}
+.decision-meta .justify{font-size:12px;line-height:1.5}
+.decision-right{text-align:right}
+.conf-val{font-size:20px;font-weight:700}
+.conf-label{font-size:10px;color:var(--muted)}
 
-.btn {
-  padding: 9px 14px; border: none; border-radius: 6px;
-  font-family: var(--font-mono); font-size: 11px; font-weight: 700;
-  cursor: pointer; transition: all .2s; text-transform: uppercase; letter-spacing: .5px;
-  width: 100%;
-}
-.btn-primary { background: var(--accent); color: #fff; }
-.btn-primary:hover { background: #2563eb; box-shadow: var(--glow-blue); }
-.btn-secondary { background: var(--bg3); color: var(--text); border: 1px solid var(--border); }
-.btn-secondary:hover { border-color: var(--accent2); color: var(--accent2); }
-.btn-green { background: rgba(16,185,129,.15); color: var(--green); border: 1px solid rgba(16,185,129,.3); }
-.btn-green:hover { background: rgba(16,185,129,.25); }
-.btn-red { background: rgba(239,68,68,.15); color: var(--red); border: 1px solid rgba(239,68,68,.3); }
-.btn.loading { opacity: .6; pointer-events: none; }
+/* ── Stat rows ───────────────────────────────────────────────────────── */
+.stat-row{display:flex;justify-content:space-between;align-items:center;
+          padding:5px 0;border-bottom:1px solid var(--border)}
+.stat-row:last-child{border:none}
+.stat-label{color:var(--muted);font-size:11px}
+.stat-val{font-size:12px;font-weight:600}
+.bull{color:var(--green)} .bear{color:var(--red)} .neutral{color:var(--yellow)}
 
-/* ── Divider ── */
-.divider { height: 1px; background: var(--border); margin: 4px 0; }
+/* ── Chart ──────────────────────────────────────────────────────────── */
+#chart-wrap{position:relative;height:260px}
 
-/* ── Price display ── */
-.price-widget {
-  background: var(--bg3); border: 1px solid var(--border); border-radius: 8px;
-  padding: 12px; text-align: center;
-}
-.price-asset { font-size: 11px; color: var(--muted); font-family: var(--font-mono); }
-.price-value { font-size: 22px; font-weight: 700; font-family: var(--font-mono); color: var(--text); margin: 2px 0; }
-.price-regime { font-size: 10px; padding: 2px 7px; border-radius: 10px; display: inline-block; margin-top: 2px; font-family: var(--font-mono); }
-.price-regime.up { background: rgba(16,185,129,.15); color: var(--green); }
-.price-regime.down { background: rgba(239,68,68,.15); color: var(--red); }
-.price-regime.side { background: rgba(245,158,11,.15); color: var(--yellow); }
-.price-regime.vol { background: rgba(139,92,246,.15); color: var(--purple); }
+/* ── Agent grid ─────────────────────────────────────────────────────── */
+.agent-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 
-/* ── Main content ── */
-main { padding: 16px; display: flex; flex-direction: column; gap: 14px; overflow-y: auto; }
+/* ── Indicators ─────────────────────────────────────────────────────── */
+.ind-list{display:flex;flex-direction:column;gap:6px}
+.ind-item{display:flex;justify-content:space-between;align-items:center;
+          background:#0d1117;border-radius:5px;padding:5px 8px}
+.ind-name{color:var(--muted);font-size:11px;width:52px}
+.ind-val{font-size:12px;font-weight:600;min-width:54px;text-align:right}
+.ind-sig{font-size:10px;padding:1px 6px;border-radius:99px;min-width:56px;text-align:center}
+.sig-bull{background:#0d2e0d;color:var(--green);border:1px solid #166534}
+.sig-bear{background:#2e0d0d;color:var(--red);border:1px solid #991b1b}
+.sig-neu{background:#1f1f0d;color:var(--yellow);border:1px solid #78350f}
 
-/* ── Cards ── */
-.card {
-  background: var(--card); border: 1px solid var(--border); border-radius: 10px;
-  padding: 14px;
-}
-.card-title {
-  font-size: 11px; font-family: var(--font-mono); color: var(--muted);
-  text-transform: uppercase; letter-spacing: 1px; margin-bottom: 10px;
-  display: flex; align-items: center; gap: 8px;
-}
-.card-title .dot { width: 6px; height: 6px; border-radius: 50%; }
-.dot-blue { background: var(--accent); }
-.dot-green { background: var(--green); }
-.dot-purple { background: var(--purple); }
-.dot-yellow { background: var(--yellow); }
-.dot-cyan { background: var(--accent2); }
-.dot-red { background: var(--red); }
+/* ── Price widget ────────────────────────────────────────────────────── */
+.price-big{font-size:26px;font-weight:700;letter-spacing:.5px}
 
-/* ── Decision banner ── */
-.decision-banner {
-  border-radius: 10px; padding: 16px 20px;
-  border: 1px solid; position: relative; overflow: hidden;
-  transition: all .4s;
-}
-.decision-banner.long {
-  background: rgba(16,185,129,.08);
-  border-color: rgba(16,185,129,.4);
-  box-shadow: var(--glow-green);
-}
-.decision-banner.short {
-  background: rgba(239,68,68,.08);
-  border-color: rgba(239,68,68,.4);
-  box-shadow: var(--glow-red);
-}
-.decision-banner.neutral { background: var(--card); border-color: var(--border); }
+/* ── Accuracy ────────────────────────────────────────────────────────── */
+.acc-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:6px}
+.acc-cell{background:#0d1117;border-radius:5px;padding:8px;text-align:center}
+.acc-cell .val{font-size:18px;font-weight:700}
+.acc-cell .lbl{font-size:10px;color:var(--muted);margin-top:2px}
 
-.decision-header { display: flex; align-items: center; gap: 16px; margin-bottom: 12px; }
-.decision-pill {
-  font-size: 24px; font-weight: 700; font-family: var(--font-mono);
-  padding: 6px 20px; border-radius: 8px; letter-spacing: 2px;
-}
-.decision-pill.long { background: rgba(16,185,129,.2); color: var(--green); border: 1px solid var(--green); }
-.decision-pill.short { background: rgba(239,68,68,.2); color: var(--red); border: 1px solid var(--red); }
-.decision-pill.neutral { background: var(--bg3); color: var(--muted); border: 1px solid var(--border); }
+/* ── LLM badge ───────────────────────────────────────────────────────── */
+.llm-badge{font-size:10px;padding:2px 7px;border-radius:99px;
+           background:#0d1a2e;color:var(--accent);border:1px solid var(--accent)}
+.llm-off{background:#1a1a1a;color:var(--muted);border-color:var(--border)}
 
-.decision-meta { display: flex; flex-direction: column; gap: 3px; }
-.decision-meta .horizon { font-size: 12px; color: var(--muted); }
-.decision-meta .conf { font-family: var(--font-mono); font-size: 12px; }
-.conf-value { color: var(--accent2); font-weight: 700; }
+/* ── Status bar ──────────────────────────────────────────────────────── */
+#statusbar{padding:6px 20px;font-size:10px;color:var(--muted);
+           border-top:1px solid var(--border);background:var(--card)}
 
-.trade-levels {
-  display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
-  margin: 10px 0;
-}
-.level-box { background: var(--bg3); border-radius: 6px; padding: 8px 10px; border: 1px solid var(--border); }
-.level-label { font-size: 10px; color: var(--muted); font-family: var(--font-mono); }
-.level-value { font-size: 13px; font-weight: 600; font-family: var(--font-mono); margin-top: 1px; }
-.level-value.entry { color: var(--accent2); }
-.level-value.sl { color: var(--red); }
-.level-value.tp { color: var(--green); }
+/* ── Spinner ─────────────────────────────────────────────────────────── */
+.spinner{display:inline-block;width:12px;height:12px;border:2px solid var(--border);
+         border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
 
-.justification-text {
-  font-size: 11px; color: #94a3b8; line-height: 1.6;
-  border-top: 1px solid var(--border); padding-top: 10px; margin-top: 6px;
-}
-
-/* ── Signal alignment row ── */
-.signal-row { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
-.signal-chip {
-  font-size: 10px; font-family: var(--font-mono);
-  padding: 3px 8px; border-radius: 4px; border: 1px solid;
-  display: flex; align-items: center; gap: 4px;
-}
-.signal-chip.bullish { background: rgba(16,185,129,.1); color: var(--green); border-color: rgba(16,185,129,.3); }
-.signal-chip.bearish { background: rgba(239,68,68,.1); color: var(--red); border-color: rgba(239,68,68,.3); }
-.signal-chip.neutral { background: rgba(245,158,11,.1); color: var(--yellow); border-color: rgba(245,158,11,.3); }
-
-/* ── Grid layouts ── */
-.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-.grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
-.grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
-
-/* ── Indicator mini cards ── */
-.ind-card {
-  background: var(--bg3); border: 1px solid var(--border); border-radius: 8px;
-  padding: 10px; display: flex; flex-direction: column; gap: 4px;
-}
-.ind-name { font-size: 10px; color: var(--muted); font-family: var(--font-mono); }
-.ind-value { font-size: 16px; font-weight: 700; font-family: var(--font-mono); }
-.ind-signal { font-size: 10px; padding: 1px 6px; border-radius: 3px; display: inline-block; font-family: var(--font-mono); }
-.ind-signal.bullish { background: rgba(16,185,129,.15); color: var(--green); }
-.ind-signal.bearish { background: rgba(239,68,68,.15); color: var(--red); }
-.ind-signal.neutral { background: rgba(245,158,11,.15); color: var(--yellow); }
-.ind-desc { font-size: 10px; color: var(--muted); line-height: 1.4; }
-
-/* ── Chart containers ── */
-.chart-wrap { position: relative; height: 200px; }
-.chart-wrap.tall { height: 260px; }
-.chart-wrap.short { height: 160px; }
-
-/* ── Pattern card ── */
-.pattern-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
-.pattern-name { font-size: 15px; font-weight: 600; color: var(--text); }
-.pattern-meta { display: flex; gap: 6px; margin-bottom: 10px; }
-.pattern-badge { font-size: 10px; padding: 2px 8px; border-radius: 4px; font-family: var(--font-mono); }
-
-.summary-block {
-  background: var(--bg3); border-radius: 6px; padding: 8px 10px;
-  margin-bottom: 6px; border-left: 3px solid;
-}
-.summary-block.structure { border-color: var(--accent); }
-.summary-block.trend { border-color: var(--accent2); }
-.summary-block.symmetry { border-color: var(--purple); }
-.summary-title { font-size: 10px; color: var(--muted); font-family: var(--font-mono); margin-bottom: 3px; }
-.summary-text { font-size: 11px; color: #94a3b8; line-height: 1.5; }
-
-/* ── Trend card ── */
-.trend-badge {
-  display: inline-flex; align-items: center; gap: 6px;
-  font-size: 13px; font-weight: 600; font-family: var(--font-mono);
-  padding: 4px 12px; border-radius: 6px; margin-bottom: 8px;
-}
-.trend-badge.uptrend { background: rgba(16,185,129,.1); color: var(--green); border: 1px solid rgba(16,185,129,.3); }
-.trend-badge.downtrend { background: rgba(239,68,68,.1); color: var(--red); border: 1px solid rgba(239,68,68,.3); }
-.trend-badge.sideways { background: rgba(245,158,11,.1); color: var(--yellow); border: 1px solid rgba(245,158,11,.3); }
-
-/* ── Radar chart ── */
-.radar-wrap { display: flex; align-items: center; gap: 16px; }
-.radar-chart-container { width: 180px; height: 180px; flex-shrink: 0; }
-.radar-dims { flex: 1; display: flex; flex-direction: column; gap: 5px; }
-.radar-dim { display: flex; align-items: center; gap: 8px; }
-.radar-label { font-size: 10px; color: var(--muted); width: 120px; font-family: var(--font-mono); }
-.radar-bar { flex: 1; height: 4px; background: var(--bg3); border-radius: 2px; }
-.radar-fill { height: 100%; border-radius: 2px; transition: width .5s; }
-.radar-val { font-size: 10px; color: var(--muted); font-family: var(--font-mono); width: 32px; text-align: right; }
-
-/* ── Accuracy tracker ── */
-.accuracy-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 10px; }
-.acc-stat { background: var(--bg3); border-radius: 6px; padding: 8px; text-align: center; border: 1px solid var(--border); }
-.acc-label { font-size: 10px; color: var(--muted); font-family: var(--font-mono); }
-.acc-value { font-size: 18px; font-weight: 700; font-family: var(--font-mono); margin-top: 2px; }
-.acc-value.good { color: var(--green); }
-.acc-value.bad { color: var(--red); }
-.acc-value.neutral { color: var(--accent2); }
-
-/* ── Prediction history table ── */
-.pred-table { width: 100%; border-collapse: collapse; font-size: 11px; }
-.pred-table th { color: var(--muted); font-family: var(--font-mono); font-size: 9px; text-transform: uppercase; letter-spacing: .8px; padding: 4px 6px; border-bottom: 1px solid var(--border); text-align: left; }
-.pred-table td { padding: 5px 6px; border-bottom: 1px solid rgba(30,45,69,.5); font-family: var(--font-mono); }
-.pred-table tr:hover td { background: var(--bg3); }
-.pred-table .correct { color: var(--green); }
-.pred-table .wrong { color: var(--red); }
-.pred-table .pending { color: var(--muted); }
-
-/* ── Stream log ── */
-.stream-log {
-  background: var(--bg3); border-radius: 6px; padding: 10px;
-  height: 120px; overflow-y: auto; font-family: var(--font-mono); font-size: 10px;
-  border: 1px solid var(--border);
-}
-.log-line { color: var(--muted); margin-bottom: 2px; }
-.log-line.info { color: var(--accent2); }
-.log-line.success { color: var(--green); }
-.log-line.warn { color: var(--yellow); }
-.log-line.error { color: var(--red); }
-
-/* ── Tabs ── */
-.tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin-bottom: 12px; }
-.tab {
-  padding: 6px 14px; font-size: 11px; font-family: var(--font-mono);
-  color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent;
-  transition: all .2s; text-transform: uppercase; letter-spacing: .5px;
-}
-.tab:hover { color: var(--text); }
-.tab.active { color: var(--accent2); border-bottom-color: var(--accent2); }
-
-.tab-panel { display: none; }
-.tab-panel.active { display: block; }
-
-/* ── Scrollbar ── */
-::-webkit-scrollbar { width: 4px; height: 4px; }
-::-webkit-scrollbar-track { background: var(--bg); }
-::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
-
-/* ── Loading skeleton ── */
-.skeleton { background: linear-gradient(90deg, var(--bg3) 25%, var(--border) 50%, var(--bg3) 75%); background-size: 400% 100%; animation: shimmer 1.5s infinite; border-radius: 4px; height: 14px; margin-bottom: 4px; }
-@keyframes shimmer { 0%{background-position:100% 0} 100%{background-position:-100% 0} }
-
-/* ── Responsive ── */
-@media (max-width: 900px) { .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; } .layout { grid-template-columns: 1fr; } aside { display: none; } }
+::-webkit-scrollbar{width:4px}
+::-webkit-scrollbar-track{background:var(--bg)}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
 </style>
 </head>
 <body>
 
+<!-- ── Header ─────────────────────────────────────────────────────────── -->
+<header>
+  <span style="font-size:20px">📈</span>
+  <h1>QuantAgent — Nifty&nbsp;50</h1>
+  <span id="market-badge" class="badge closed">Market Closed</span>
+  <span id="llm-status" class="llm-badge llm-off" style="margin-left:auto">LLM: OFF</span>
+</header>
+
 <div class="layout">
-  <!-- ── Header ── -->
-  <header>
-    <div class="logo">
-      <div class="logo-icon">📈</div>
-      QuantAgent
-    </div>
-    <span style="color:var(--muted);font-size:11px;font-family:var(--font-mono)">Multi-Agent HFT System</span>
-    <div class="header-right">
-      <div class="live-badge"><div class="live-dot"></div><span id="statusText">READY</span></div>
-      <span id="barCounter" style="font-family:var(--font-mono);font-size:11px;color:var(--muted)">— bars</span>
-    </div>
-  </header>
 
-  <!-- ── Sidebar ── -->
+  <!-- ── Sidebar ──────────────────────────────────────────────────────── -->
   <aside>
-    <div class="sidebar-section">
-      <div class="sidebar-label">Asset</div>
-      <select id="assetSelect">
-        <option>SPX</option><option>NQ</option><option>BTC/USD</option>
-        <option>ES</option><option>QQQ</option><option>AAPL</option>
-        <option>TSLA</option><option>DJI</option><option>CL</option><option>VIX</option>
-      </select>
+
+    <div class="card">
+      <div class="card-title">Stock</div>
+      <label>Nifty 50 Symbol</label>
+      <select id="symbol-sel"></select>
     </div>
 
-    <div class="sidebar-section">
-      <div class="sidebar-label">Timeframe</div>
-      <select id="tfSelect">
-        <option value="15m">15 minutes</option>
+    <div class="card">
+      <div class="card-title">Timeframe</div>
+      <select id="tf-sel">
+        <option value="15m" selected>15 min</option>
+        <option value="5m">5 min</option>
+        <option value="30m">30 min</option>
         <option value="1h">1 hour</option>
-        <option value="4h">4 hours</option>
-        <option value="30m">30 minutes</option>
-        <option value="5m">5 minutes</option>
       </select>
+      <div style="margin-top:8px">
+        <label>History period</label>
+        <select id="period-sel">
+          <option value="1d">1 day</option>
+          <option value="5d" selected>5 days</option>
+          <option value="1mo">1 month</option>
+        </select>
+      </div>
     </div>
 
-    <div class="divider"></div>
-
-    <div class="price-widget">
-      <div class="price-asset" id="priceAsset">SPX</div>
-      <div class="price-value" id="priceValue">—</div>
-      <div class="price-regime neutral" id="priceRegime">INITIALIZING</div>
+    <!-- API Key input -->
+    <div class="card">
+      <div class="card-title">Claude API Key <span style="color:var(--muted)">(optional)</span></div>
+      <label>Enhances pattern &amp; decision reasoning</label>
+      <input type="password" id="api-key-in" placeholder="sk-ant-..."/>
+      <button class="secondary" style="margin-top:8px" onclick="saveKey()">Save Key</button>
+      <div id="key-msg" style="font-size:10px;color:var(--muted);margin-top:6px"></div>
     </div>
 
-    <button class="btn btn-primary" id="btnInit">⚡ Initialize Session</button>
-    <button class="btn btn-secondary" id="btnAnalyze">🔍 Run Analysis</button>
-
-    <div class="divider"></div>
-
-    <button class="btn btn-green" id="btnStartStream">▶ Start Live Feed</button>
-    <button class="btn btn-red" id="btnStopStream" style="display:none">⏹ Stop Feed</button>
-    <button class="btn btn-secondary" id="btnTick">⏭ Next Bar</button>
-
-    <div class="divider"></div>
-
-    <div class="sidebar-section">
-      <div class="sidebar-label">Backtest Bars</div>
-      <input type="number" id="btBars" value="300" min="100" max="2000" style="width:100%">
-      <button class="btn btn-secondary" id="btnBacktest" style="margin-top:4px">📊 Run Backtest</button>
+    <!-- Price widget -->
+    <div class="card">
+      <div class="card-title">Latest Price</div>
+      <div class="price-big" id="price-big">—</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:4px" id="price-time">—</div>
     </div>
 
-    <div class="divider"></div>
-
-    <div class="stream-log" id="streamLog">
-      <div class="log-line info">// QuantAgent ready</div>
-      <div class="log-line">// Initialize session to begin</div>
+    <!-- Controls -->
+    <div class="card" style="display:flex;flex-direction:column;gap:8px">
+      <div class="card-title">Controls</div>
+      <button id="analyze-btn" onclick="runAnalysis()">▶ Analyse Now</button>
+      <button class="secondary" id="stream-btn" onclick="toggleStream()">⏵ Live Stream</button>
+      <button class="secondary" onclick="runBacktest()">⏪ Quick Backtest</button>
     </div>
+
+    <!-- Accuracy -->
+    <div class="card">
+      <div class="card-title">Session Accuracy</div>
+      <div class="acc-grid">
+        <div class="acc-cell"><div class="val bull" id="acc-pct">—</div><div class="lbl">Accuracy</div></div>
+        <div class="acc-cell"><div class="val" id="acc-total">0</div><div class="lbl">Calls</div></div>
+        <div class="acc-cell"><div class="val" id="acc-rcc">—</div><div class="lbl">Avg Rcc</div></div>
+      </div>
+    </div>
+
   </aside>
 
-  <!-- ── Main ── -->
+  <!-- ── Main ─────────────────────────────────────────────────────────── -->
   <main>
-    <!-- Decision Banner -->
-    <div class="decision-banner neutral" id="decisionBanner">
-      <div class="decision-header">
-        <div class="decision-pill neutral" id="decisionPill">WAITING</div>
-        <div class="decision-meta">
-          <div class="horizon" id="decisionHorizon">Run analysis to generate trading decision</div>
-          <div class="conf">Confidence: <span class="conf-value" id="decisionConf">—</span></div>
+
+    <!-- Decision banner -->
+    <div id="decision-banner" class="card">
+      <div class="dir-badge" id="dir-badge">—</div>
+      <div class="decision-meta">
+        <div class="horizon" id="d-horizon">Select a stock and click Analyse Now</div>
+        <div class="justify" id="d-justify" style="color:var(--muted)">
+          The system will run IndicatorAgent → PatternAgent → TrendAgent → RiskAgent → DecisionAgent
+          and output a LONG or SHORT signal for the next 3 candles.
         </div>
-        <div style="margin-left:auto; text-align:right">
-          <div style="font-size:10px;color:var(--muted);font-family:var(--font-mono)">R:R RATIO</div>
-          <div style="font-size:18px;font-weight:700;font-family:var(--font-mono);color:var(--accent2)" id="rrRatio">—</div>
-        </div>
+        <div id="d-watch" style="font-size:10px;color:var(--yellow);margin-top:4px"></div>
       </div>
-
-      <div class="trade-levels">
-        <div class="level-box"><div class="level-label">ENTRY</div><div class="level-value entry" id="lvlEntry">—</div></div>
-        <div class="level-box"><div class="level-label">STOP LOSS</div><div class="level-value sl" id="lvlSL">—</div></div>
-        <div class="level-box"><div class="level-label">TAKE PROFIT</div><div class="level-value tp" id="lvlTP">—</div></div>
-      </div>
-
-      <div class="signal-row" id="signalRow"></div>
-      <div class="justification-text" id="decisionJust">Analysis results will appear here after running the QuantAgent pipeline.</div>
-    </div>
-
-    <!-- Agent Outputs -->
-    <div class="tabs">
-      <div class="tab active" data-tab="overview">Overview</div>
-      <div class="tab" data-tab="indicators">Indicator Agent</div>
-      <div class="tab" data-tab="pattern">Pattern Agent</div>
-      <div class="tab" data-tab="trend">Trend Agent</div>
-      <div class="tab" data-tab="risk">Risk Agent</div>
-      <div class="tab" data-tab="accuracy">Accuracy Tracker</div>
-      <div class="tab" data-tab="charts">📊 Charts</div>
-    </div>
-
-    <!-- Overview Tab -->
-    <div class="tab-panel active" id="tab-overview">
-      <div class="grid-2">
-        <!-- OHLC Chart -->
-        <div class="card" style="grid-column: 1 / -1">
-          <div class="card-title"><div class="dot dot-blue"></div>PRICE CHART — OHLC (15m)</div>
-          <div class="chart-wrap tall"><canvas id="ohlcChart"></canvas></div>
+      <div class="decision-right">
+        <div class="conf-val" id="d-conf">—</div>
+        <div class="conf-label">Confidence</div>
+        <div style="margin-top:8px;font-size:11px">
+          Entry: <span id="d-entry" class="stat-val">—</span>
         </div>
-
-        <!-- Signal Summary -->
-        <div class="card">
-          <div class="card-title"><div class="dot dot-cyan"></div>SIGNAL SUMMARY</div>
-          <div id="signalSummary">
-            <div class="skeleton" style="width:80%"></div>
-            <div class="skeleton" style="width:60%"></div>
-            <div class="skeleton" style="width:70%"></div>
-          </div>
-        </div>
-
-        <!-- Accuracy Quick View -->
-        <div class="card">
-          <div class="card-title"><div class="dot dot-green"></div>ACCURACY METRICS</div>
-          <div class="accuracy-grid">
-            <div class="acc-stat"><div class="acc-label">ACCURACY</div><div class="acc-value neutral" id="ov-acc">—%</div></div>
-            <div class="acc-stat"><div class="acc-label">AVG Rcc</div><div class="acc-value neutral" id="ov-rcc">—</div></div>
-            <div class="acc-stat"><div class="acc-label">LONG ACC</div><div class="acc-value neutral" id="ov-lacc">—%</div></div>
-            <div class="acc-stat"><div class="acc-label">SHORT ACC</div><div class="acc-value neutral" id="ov-sacc">—%</div></div>
-          </div>
-          <div class="chart-wrap short"><canvas id="accChart"></canvas></div>
+        <div style="font-size:11px">
+          SL: <span id="d-sl" class="stat-val bear">—</span>&nbsp;
+          TP: <span id="d-tp" class="stat-val bull">—</span>
         </div>
       </div>
     </div>
 
-    <!-- Indicator Agent Tab -->
-    <div class="tab-panel" id="tab-indicators">
+    <!-- Price chart -->
+    <div class="card">
+      <div class="card-title">Price Chart — <span id="chart-sym">—</span></div>
+      <div id="chart-wrap"><canvas id="price-chart"></canvas></div>
+    </div>
+
+    <!-- Agent grid -->
+    <div class="agent-grid">
+
+      <!-- Indicators -->
       <div class="card">
-        <div class="card-title"><div class="dot dot-blue"></div>INDICATOR AGENT — RSI / MACD / ROC / STOCH / WILLR</div>
-        <div class="grid-4" id="indCards">
-          <div class="ind-card"><div class="ind-name">RSI</div><div class="ind-value" id="v-rsi">—</div><span class="ind-signal neutral" id="s-rsi">NEUTRAL</span><div class="ind-desc" id="d-rsi">Loading...</div></div>
-          <div class="ind-card"><div class="ind-name">MACD</div><div class="ind-value" id="v-macd">—</div><span class="ind-signal neutral" id="s-macd">NEUTRAL</span><div class="ind-desc" id="d-macd">Loading...</div></div>
-          <div class="ind-card"><div class="ind-name">ROC</div><div class="ind-value" id="v-roc">—</div><span class="ind-signal neutral" id="s-roc">NEUTRAL</span><div class="ind-desc" id="d-roc">Loading...</div></div>
-          <div class="ind-card"><div class="ind-name">STOCH</div><div class="ind-value" id="v-stoch">—</div><span class="ind-signal neutral" id="s-stoch">NEUTRAL</span><div class="ind-desc" id="d-stoch">Loading...</div></div>
+        <div class="card-title">
+          Indicator Agent
+          <span id="ind-overall" style="float:right;font-size:11px"></span>
         </div>
-        <div class="ind-card" style="margin-top:8px">
-          <div class="ind-name">WILLIAMS %R</div>
-          <div style="display:flex;align-items:center;gap:16px;margin-top:4px">
-            <div><div class="ind-value" id="v-willr">—</div><span class="ind-signal neutral" id="s-willr">NEUTRAL</span></div>
-            <div class="ind-desc" id="d-willr" style="flex:1">Loading...</div>
-          </div>
+        <div class="ind-list" id="ind-list">
+          <div style="color:var(--muted);font-size:11px">No data yet</div>
         </div>
-        <div style="margin-top:10px;padding:10px;background:var(--bg3);border-radius:6px;font-size:11px;color:#94a3b8;line-height:1.6" id="ind-summary">—</div>
+        <div style="margin-top:8px;font-size:11px;color:var(--muted)" id="ind-summary"></div>
       </div>
-      <div class="grid-2" style="margin-top:14px">
-        <div class="card"><div class="card-title"><div class="dot dot-blue"></div>RSI</div><div class="chart-wrap"><canvas id="rsiChart"></canvas></div></div>
-        <div class="card"><div class="card-title"><div class="dot dot-purple"></div>MACD</div><div class="chart-wrap"><canvas id="macdChart"></canvas></div></div>
-      </div>
-    </div>
 
-    <!-- Pattern Agent Tab -->
-    <div class="tab-panel" id="tab-pattern">
+      <!-- Pattern -->
       <div class="card">
-        <div class="card-title"><div class="dot dot-purple"></div>PATTERN AGENT — CHART FORMATION DETECTION</div>
-        <div class="pattern-header">
-          <div class="pattern-name" id="patternName">No Pattern Detected</div>
-          <div style="display:flex;gap:8px;align-items:center">
-            <div style="font-size:12px;color:var(--muted)">Confidence:</div>
-            <div style="font-family:var(--font-mono);font-size:14px;font-weight:700;color:var(--accent2)" id="patternConf">—</div>
-          </div>
+        <div class="card-title">Pattern Agent</div>
+        <div class="stat-row">
+          <span class="stat-label">Pattern</span>
+          <span class="stat-val" id="pat-name">—</span>
         </div>
-        <div class="pattern-meta">
-          <span class="pattern-badge neutral" id="patternDir" style="background:rgba(245,158,11,.1);color:var(--yellow);border:1px solid rgba(245,158,11,.3)">NEUTRAL</span>
-          <span class="pattern-badge neutral" id="patternRel" style="background:var(--bg3);color:var(--muted);border:1px solid var(--border)">RELIABILITY: —</span>
+        <div class="stat-row">
+          <span class="stat-label">Direction</span>
+          <span class="stat-val" id="pat-dir">—</span>
         </div>
-        <div class="summary-block structure"><div class="summary-title">STRUCTURE SUMMARY</div><div class="summary-text" id="structSummary">—</div></div>
-        <div class="summary-block trend"><div class="summary-title">TREND SUMMARY</div><div class="summary-text" id="trendSummary2">—</div></div>
-        <div class="summary-block symmetry"><div class="summary-title">SYMMETRY SUMMARY</div><div class="summary-text" id="symmetrySummary">—</div></div>
+        <div class="stat-row">
+          <span class="stat-label">Confidence</span>
+          <span class="stat-val" id="pat-conf">—</span>
+        </div>
+        <div style="margin-top:8px;font-size:11px;color:var(--muted)" id="pat-struct"></div>
+        <!-- LLM enrichment block (hidden until LLM responds) -->
+        <div id="llm-pat-block" hidden style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">
+          <div style="font-size:10px;color:var(--accent);margin-bottom:3px">✦ LLM Vision confirms:</div>
+          <div style="font-size:12px;font-weight:600" id="llm-pat-name"></div>
+          <div style="font-size:11px;color:var(--muted);margin-top:3px" id="llm-pat-struct"></div>
+        </div>
       </div>
-      <div class="card" style="margin-top:14px">
-        <div class="card-title"><div class="dot dot-purple"></div>PATTERN VISUALIZATION — CANDLESTICK CHART</div>
-        <div class="chart-wrap tall"><canvas id="patternChart"></canvas></div>
-      </div>
-    </div>
 
-    <!-- Trend Agent Tab -->
-    <div class="tab-panel" id="tab-trend">
+      <!-- Trend -->
       <div class="card">
-        <div class="card-title"><div class="dot dot-cyan"></div>TREND AGENT — SLOPE-AWARE DETECTION (Algorithm 1)</div>
-        <div style="display:flex;align-items:center;gap:16px;margin-bottom:10px">
-          <div class="trend-badge sideways" id="trendBadge">SIDEWAYS</div>
-          <div style="font-size:11px;color:var(--muted)">κ (avg slope): <span style="font-family:var(--font-mono);color:var(--text)" id="trendKappa">—</span></div>
-          <div style="font-size:11px;color:var(--muted)">Momentum: <span style="font-family:var(--font-mono);color:var(--accent2)" id="trendMomentum">—</span></div>
-          <div style="font-size:11px;color:var(--muted)">Breakout Prob: <span style="font-family:var(--font-mono);color:var(--yellow)" id="trendBreakout">—</span></div>
+        <div class="card-title">Trend Agent</div>
+        <div class="stat-row">
+          <span class="stat-label">Trend</span>
+          <span class="stat-val" id="tre-cls">—</span>
         </div>
-        <div class="summary-block structure"><div class="summary-title">PREDICTION</div><div class="summary-text" id="trendPrediction">—</div></div>
-        <div class="summary-block trend"><div class="summary-title">REASONING</div><div class="summary-text" id="trendReasoning">—</div></div>
-        <div class="summary-block symmetry"><div class="summary-title">SIGNALS</div><div class="summary-text" id="trendSignals">—</div></div>
-      </div>
-      <div class="card" style="margin-top:14px">
-        <div class="card-title"><div class="dot dot-cyan"></div>SUPPORT / RESISTANCE CHANNEL</div>
-        <div class="grid-2" style="margin-bottom:10px">
-          <div class="ind-card">
-            <div class="ind-name">RESISTANCE LINE (R_t)</div>
-            <div style="font-size:12px;font-family:var(--font-mono);margin-top:4px">
-              Slope: <span id="rSlope" style="color:var(--text)">—</span> |
-              Direction: <span id="rDir" style="color:var(--accent2)">—</span> |
-              R²: <span id="rR2" style="color:var(--muted)">—</span>
-            </div>
-          </div>
-          <div class="ind-card">
-            <div class="ind-name">SUPPORT LINE (S_t)</div>
-            <div style="font-size:12px;font-family:var(--font-mono);margin-top:4px">
-              Slope: <span id="sSlope" style="color:var(--text)">—</span> |
-              Direction: <span id="sDir" style="color:var(--accent2)">—</span> |
-              R²: <span id="sR2" style="color:var(--muted)">—</span>
-            </div>
-          </div>
+        <div class="stat-row">
+          <span class="stat-label">κ (kappa)</span>
+          <span class="stat-val" id="tre-kappa">—</span>
         </div>
-        <div class="chart-wrap tall"><canvas id="trendChart"></canvas></div>
+        <div class="stat-row">
+          <span class="stat-label">Breakout prob.</span>
+          <span class="stat-val" id="tre-brk">—</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">Channel width ₹</span>
+          <span class="stat-val" id="tre-cw">—</span>
+        </div>
+        <div style="margin-top:8px;font-size:11px;color:var(--muted)" id="tre-pred"></div>
       </div>
-    </div>
 
-    <!-- Risk Agent Tab -->
-    <div class="tab-panel" id="tab-risk">
+      <!-- Risk -->
       <div class="card">
-        <div class="card-title"><div class="dot dot-red"></div>RISK AGENT — RADAR CHART & TRADE BOUNDARIES</div>
-        <div class="radar-wrap">
-          <div class="radar-chart-container"><canvas id="radarChart"></canvas></div>
-          <div class="radar-dims" id="radarDims">
-            <div class="radar-dim"><span class="radar-label">Momentum Strength</span><div class="radar-bar"><div class="radar-fill" id="rf-ms" style="width:0%;background:var(--accent)"></div></div><span class="radar-val" id="rv-ms">—</span></div>
-            <div class="radar-dim"><span class="radar-label">Volatility Risk</span><div class="radar-bar"><div class="radar-fill" id="rf-vr" style="width:0%;background:var(--red)"></div></div><span class="radar-val" id="rv-vr">—</span></div>
-            <div class="radar-dim"><span class="radar-label">S/R Strength</span><div class="radar-bar"><div class="radar-fill" id="rf-sr" style="width:0%;background:var(--green)"></div></div><span class="radar-val" id="rv-sr">—</span></div>
-            <div class="radar-dim"><span class="radar-label">Breakout Likelihood</span><div class="radar-bar"><div class="radar-fill" id="rf-bl" style="width:0%;background:var(--yellow)"></div></div><span class="radar-val" id="rv-bl">—</span></div>
-            <div class="radar-dim"><span class="radar-label">Trend Certainty</span><div class="radar-bar"><div class="radar-fill" id="rf-tc" style="width:0%;background:var(--accent2)"></div></div><span class="radar-val" id="rv-tc">—</span></div>
-            <div class="radar-dim"><span class="radar-label">Pattern Reliability</span><div class="radar-bar"><div class="radar-fill" id="rf-pr" style="width:0%;background:var(--purple)"></div></div><span class="radar-val" id="rv-pr">—</span></div>
-          </div>
+        <div class="card-title">Risk Agent</div>
+        <div class="stat-row">
+          <span class="stat-label">Risk / Reward</span>
+          <span class="stat-val" id="rsk-rr">—</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">Entry ₹</span>
+          <span class="stat-val" id="rsk-entry">—</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">Stop Loss ₹</span>
+          <span class="stat-val bear" id="rsk-sl">—</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">Take Profit ₹</span>
+          <span class="stat-val bull" id="rsk-tp">—</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">Risk score</span>
+          <span class="stat-val" id="rsk-score">—</span>
         </div>
       </div>
-      <div class="card" style="margin-top:14px">
-        <div class="card-title"><div class="dot dot-red"></div>RISK-REWARD ZONE CHART</div>
-        <div class="chart-wrap tall"><canvas id="riskChart"></canvas></div>
-        <div style="margin-top:10px;display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
-          <div class="ind-card"><div class="ind-name">RISK ZONE WIDTH (ρ)</div><div class="ind-value" id="riskWidth" style="color:var(--red)">—</div></div>
-          <div class="ind-card"><div class="ind-name">REWARD ZONE WIDTH (R)</div><div class="ind-value" id="rewardWidth" style="color:var(--green)">—</div></div>
-          <div class="ind-card"><div class="ind-name">OVERALL RISK SCORE</div><div class="ind-value" id="riskScore" style="color:var(--yellow)">—</div></div>
-        </div>
-      </div>
-    </div>
 
-    <!-- Accuracy Tab -->
-    <div class="tab-panel" id="tab-accuracy">
-      <div class="card">
-        <div class="card-title"><div class="dot dot-green"></div>PREDICTION ACCURACY TRACKER</div>
-        <div class="accuracy-grid">
-          <div class="acc-stat"><div class="acc-label">TOTAL PREDICTIONS</div><div class="acc-value neutral" id="ac-total">0</div></div>
-          <div class="acc-stat"><div class="acc-label">VALIDATED</div><div class="acc-value neutral" id="ac-validated">0</div></div>
-          <div class="acc-stat"><div class="acc-label">ACCURACY</div><div class="acc-value good" id="ac-acc">0%</div></div>
-          <div class="acc-stat"><div class="acc-label">AVG SCORE</div><div class="acc-value good" id="ac-avg">0%</div></div>
-        </div>
-        <div class="accuracy-grid">
-          <div class="acc-stat"><div class="acc-label">AVG Rcc</div><div class="acc-value neutral" id="ac-rcc">—</div></div>
-          <div class="acc-stat"><div class="acc-label">AVG Rmax</div><div class="acc-value good" id="ac-rmax">—</div></div>
-          <div class="acc-stat"><div class="acc-label">AVG Rmin</div><div class="acc-value bad" id="ac-rmin">—</div></div>
-          <div class="acc-stat"><div class="acc-label">LONG / SHORT</div><div class="acc-value neutral" id="ac-ls">—/—</div></div>
-        </div>
-        <div class="chart-wrap" style="margin-top:10px"><canvas id="accuracyLineChart"></canvas></div>
-      </div>
-      <div class="card" style="margin-top:14px">
-        <div class="card-title"><div class="dot dot-green"></div>PREDICTION HISTORY</div>
-        <div style="overflow-x:auto">
-          <table class="pred-table">
-            <thead><tr><th>#</th><th>Direction</th><th>Entry</th><th>Result</th><th>Hits</th><th>Rcc%</th><th>Rmax%</th><th>Rmin%</th></tr></thead>
-            <tbody id="predHistBody"><tr><td colspan="8" style="text-align:center;color:var(--muted);padding:12px">No predictions yet</td></tr></tbody>
-          </table>
-        </div>
-      </div>
-    </div>
+    </div><!-- /agent-grid -->
 
-    <!-- Charts Tab (Matplotlib PNGs from backend) -->
-    <div class="tab-panel" id="tab-charts">
-      <div style="display:flex;gap:10px;margin-bottom:12px;align-items:center">
-        <button class="btn btn-primary" id="btnGenCharts" style="width:auto;padding:8px 18px">🎨 Generate Agent Charts</button>
-        <span style="font-size:11px;color:var(--muted);font-family:var(--font-mono)" id="chartStatus">Click to generate high-quality matplotlib charts from all 4 agents</span>
-      </div>
-      <div class="grid-2" id="chartGrid">
-        <div class="card"><div class="card-title"><div class="dot dot-blue"></div>INDICATOR AGENT CHART</div>
-          <div id="chartIndicator" style="min-height:200px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-family:var(--font-mono);font-size:11px">Not generated yet</div></div>
-        <div class="card"><div class="dot dot-purple" style="display:inline-block;margin-right:6px"></div><span style="font-size:11px;font-family:var(--font-mono);color:var(--muted);text-transform:uppercase;letter-spacing:1px">PATTERN AGENT CHART</span>
-          <div id="chartPattern" style="min-height:200px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-family:var(--font-mono);font-size:11px;margin-top:10px">Not generated yet</div></div>
-        <div class="card"><div class="card-title"><div class="dot dot-cyan"></div>TREND AGENT CHART</div>
-          <div id="chartTrend" style="min-height:200px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-family:var(--font-mono);font-size:11px">Not generated yet</div></div>
-        <div class="card"><div class="card-title"><div class="dot dot-red"></div>RISK AGENT CHART</div>
-          <div id="chartRisk" style="min-height:200px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-family:var(--font-mono);font-size:11px">Not generated yet</div></div>
-      </div>
+    <!-- Backtest results -->
+    <div id="bt-card" class="card" hidden>
+      <div class="card-title">Backtest Results</div>
+      <div id="bt-body"></div>
     </div>
 
   </main>
 </div>
 
-<script>
-// ── State ──
-let sessionId = null;
-let eventSource = null;
-let currentData = null;
-let charts = {};
-let accHistory = [];
+<div id="statusbar">Ready. Select a Nifty 50 stock and click Analyse Now.</div>
 
-// ── Utilities ──
-const $ = id => document.getElementById(id);
-const log = (msg, type = '') => {
-  const el = $('streamLog');
-  const div = document.createElement('div');
-  div.className = `log-line ${type}`;
-  div.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
-  el.appendChild(div);
-  el.scrollTop = el.scrollHeight;
+<script>
+// ── State ──────────────────────────────────────────────────────────────
+const S = {
+  sessionId: 'sess_' + Math.random().toString(36).slice(2,9),
+  symbol: 'RELIANCE',
+  interval: '15m',
+  period: '5d',
+  streaming: false,
+  evtSource: null,
+  chart: null,
 };
 
-function setStatus(text, color = 'var(--accent2)') {
-  $('statusText').textContent = text;
-  $('statusText').style.color = color;
+// ── Boot ───────────────────────────────────────────────────────────────
+(async function init() {
+  await loadStocks();
+  buildChart();
+  checkMarket();
+  setStatus('Ready.');
+})();
+
+// ── Stock list ─────────────────────────────────────────────────────────
+async function loadStocks() {
+  const res = await fetch('/api/stocks');
+  const { stocks } = await res.json();
+  const sel = document.getElementById('symbol-sel');
+  stocks.forEach(s => {
+    const opt = document.createElement('option');
+    opt.value = s.symbol;
+    opt.textContent = `${s.symbol} — ${s.name}`;
+    if (s.symbol === S.symbol) opt.selected = true;
+    sel.appendChild(opt);
+  });
+  sel.addEventListener('change', () => { S.symbol = sel.value; });
 }
 
-// ── Chart Setup ──
-function initCharts() {
-  Chart.defaults.color = '#64748b';
-  Chart.defaults.borderColor = '#1e2d45';
-  Chart.defaults.font.family = "'Space Mono', monospace";
-  Chart.defaults.font.size = 10;
-
-  // OHLC (line for now, shows close prices as candlestick simulation)
-  charts.ohlc = new Chart($('ohlcChart'), {
-    type: 'bar',
-    data: { labels: [], datasets: [{
-      label: 'Price', data: [], backgroundColor: [], borderColor: [],
-      borderWidth: 1, borderSkipped: false
-    }]},
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false }, tooltip: {
-        callbacks: { label: ctx => `Close: ${ctx.raw?.c?.toFixed(4) ?? ctx.raw}` }
-      }},
-      scales: {
-        x: { grid: { color: '#1e2d45' }, ticks: { maxTicksLimit: 10, maxRotation: 0 } },
-        y: { grid: { color: '#1e2d45' }, position: 'right' }
-      }
-    }
-  });
-
-  // RSI
-  charts.rsi = new Chart($('rsiChart'), {
-    type: 'line',
-    data: { labels: [], datasets: [
-      { label: 'RSI', data: [], borderColor: '#3b82f6', borderWidth: 1.5, fill: false, tension: 0.3, pointRadius: 0 },
-      { label: 'OB', data: [], borderColor: 'rgba(239,68,68,.4)', borderWidth: 1, borderDash: [4,4], pointRadius: 0, fill: false },
-      { label: 'OS', data: [], borderColor: 'rgba(16,185,129,.4)', borderWidth: 1, borderDash: [4,4], pointRadius: 0, fill: false }
-    ]},
-    options: { responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
-      scales: { x: { grid: { color: '#1e2d45' } }, y: { grid: { color: '#1e2d45' }, min: 0, max: 100, position: 'right' } }
-    }
-  });
-
-  // MACD
-  charts.macd = new Chart($('macdChart'), {
-    type: 'bar',
-    data: { labels: [], datasets: [
-      { label: 'Histogram', data: [], backgroundColor: [], type: 'bar', yAxisID: 'y' },
-      { label: 'MACD', data: [], borderColor: '#3b82f6', borderWidth: 1.5, type: 'line', fill: false, tension: 0.3, pointRadius: 0, yAxisID: 'y' },
-      { label: 'Signal', data: [], borderColor: '#ef4444', borderWidth: 1.5, type: 'line', fill: false, tension: 0.3, pointRadius: 0, yAxisID: 'y' }
-    ]},
-    options: { responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
-      scales: { x: { grid: { color: '#1e2d45' } }, y: { grid: { color: '#1e2d45' }, position: 'right' } }
-    }
-  });
-
-  // Pattern chart (candlestick as bars)
-  charts.pattern = new Chart($('patternChart'), {
-    type: 'bar',
-    data: { labels: [], datasets: [{
-      label: 'Close', data: [], backgroundColor: [], borderColor: [], borderWidth: 1, borderSkipped: false
-    }]},
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
-      scales: {
-        x: { grid: { color: '#1e2d45' }, ticks: { maxTicksLimit: 10 } },
-        y: { grid: { color: '#1e2d45' }, position: 'right' }
-      }
-    }
-  });
-
-  // Trend chart
-  charts.trend = new Chart($('trendChart'), {
-    type: 'line',
-    data: { labels: [], datasets: [
-      { label: 'Close', data: [], borderColor: '#e2e8f0', borderWidth: 1.5, fill: false, tension: 0.1, pointRadius: 0 },
-      { label: 'Resistance', data: [], borderColor: '#ef4444', borderWidth: 1.5, fill: false, borderDash: [5,3], tension: 0, pointRadius: 0 },
-      { label: 'Support', data: [], borderColor: '#3b82f6', borderWidth: 1.5, fill: false, borderDash: [5,3], tension: 0, pointRadius: 0 }
-    ]},
-    options: { responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { labels: { boxWidth: 12 } } },
-      scales: {
-        x: { grid: { color: '#1e2d45' }, ticks: { maxTicksLimit: 10 } },
-        y: { grid: { color: '#1e2d45' }, position: 'right' }
-      }
-    }
-  });
-
-  // Risk chart
-  charts.risk = new Chart($('riskChart'), {
-    type: 'line',
-    data: { labels: [], datasets: [
-      { label: 'Price', data: [], borderColor: '#e2e8f0', borderWidth: 1.5, fill: false, tension: 0.1, pointRadius: 0 },
-      { label: 'Take Profit', data: [], borderColor: '#10b981', borderWidth: 1.5, borderDash: [6,3], fill: false, pointRadius: 0, tension: 0 },
-      { label: 'Stop Loss', data: [], borderColor: '#ef4444', borderWidth: 1.5, borderDash: [6,3], fill: false, pointRadius: 0, tension: 0 },
-      { label: 'Entry', data: [], borderColor: '#06b6d4', borderWidth: 1.5, borderDash: [3,3], fill: false, pointRadius: 0, tension: 0 }
-    ]},
-    options: { responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { labels: { boxWidth: 12 } } },
-      scales: { x: { grid: { color: '#1e2d45' } }, y: { grid: { color: '#1e2d45' }, position: 'right' } }
-    }
-  });
-
-  // Radar chart
-  charts.radar = new Chart($('radarChart'), {
-    type: 'radar',
-    data: {
-      labels: ['Momentum', 'Volatility', 'S/R Strength', 'Breakout', 'Trend', 'Pattern'],
-      datasets: [{
-        data: [0.5, 0.5, 0.5, 0.5, 0.5, 0.5],
-        borderColor: '#3b82f6',
-        backgroundColor: 'rgba(59,130,246,0.15)',
-        borderWidth: 1.5,
-        pointBackgroundColor: '#3b82f6',
-        pointRadius: 3
-      }]
-    },
-    options: {
-      responsive: true, maintainAspectRatio: true,
-      plugins: { legend: { display: false } },
-      scales: { r: {
-        min: 0, max: 1,
-        grid: { color: '#1e2d45' },
-        ticks: { display: false, stepSize: 0.2 },
-        pointLabels: { font: { size: 9 }, color: '#64748b' }
-      }}
-    }
-  });
-
-  // Accuracy chart
-  charts.acc = new Chart($('accChart'), {
-    type: 'line',
-    data: { labels: [], datasets: [
-      { label: 'Accuracy%', data: [], borderColor: '#10b981', borderWidth: 1.5, fill: true, backgroundColor: 'rgba(16,185,129,0.05)', tension: 0.3, pointRadius: 2 }
-    ]},
-    options: { responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
-      scales: { x: { display: false }, y: { grid: { color: '#1e2d45' }, min: 0, max: 100, position: 'right' } }
-    }
-  });
-
-  // Accuracy line chart (in accuracy tab)
-  charts.accLine = new Chart($('accuracyLineChart'), {
-    type: 'line',
-    data: { labels: [], datasets: [
-      { label: 'Acc%', data: [], borderColor: '#10b981', borderWidth: 1.5, fill: false, tension: 0.3, pointRadius: 2 },
-      { label: 'Rcc%', data: [], borderColor: '#3b82f6', borderWidth: 1.5, fill: false, tension: 0.3, pointRadius: 2 }
-    ]},
-    options: { responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { labels: { boxWidth: 12 } } },
-      scales: { x: { grid: { color: '#1e2d45' } }, y: { grid: { color: '#1e2d45' }, position: 'right' } }
-    }
-  });
-}
-
-// ── Update UI from analysis result ──
-function updateUI(data) {
-  currentData = data;
-  const d = data.decision;
-
-  // Decision banner
-  const banner = $('decisionBanner');
-  const pill = $('decisionPill');
-  banner.className = 'decision-banner ' + d.direction.toLowerCase();
-  pill.className = 'decision-pill ' + d.direction.toLowerCase();
-  pill.textContent = d.direction;
-  $('decisionHorizon').textContent = d.forecast_horizon;
-  $('decisionConf').textContent = (d.confidence * 100).toFixed(0) + '%';
-  $('rrRatio').textContent = '1:' + d.risk_reward_ratio.toFixed(2);
-  $('lvlEntry').textContent = d.entry_price.toFixed(4);
-  $('lvlSL').textContent = d.stop_loss.toFixed(4);
-  $('lvlTP').textContent = d.take_profit.toFixed(4);
-  $('decisionJust').textContent = d.justification.length > 400 ? d.justification.slice(0, 400) + '...' : d.justification;
-
-  // Signal chips
-  const row = $('signalRow');
-  row.innerHTML = '';
-  for (const [k, v] of Object.entries(d.signal_alignment)) {
-    const chip = document.createElement('div');
-    chip.className = 'signal-chip ' + v.toLowerCase();
-    chip.textContent = `${k}: ${v}`;
-    row.appendChild(chip);
-  }
-
-  // ── Indicators ──
-  const ind = data.indicators;
-  updateIndicator('rsi', ind.rsi.value.toFixed(2), ind.rsi.signal, ind.rsi.description);
-  updateIndicator('macd', ind.macd.value.toFixed(4), ind.macd.signal, ind.macd.description);
-  updateIndicator('roc', ind.roc.value.toFixed(3) + '%', ind.roc.signal, ind.roc.description);
-  updateIndicator('stoch', ind.stoch.value.toFixed(2), ind.stoch.signal, ind.stoch.description);
-  updateIndicator('willr', ind.willr.value.toFixed(2), ind.willr.signal, ind.willr.description);
-  $('ind-summary').textContent = ind.summary;
-
-  // RSI chart
-  if (ind.rsi.series && ind.rsi.series.length > 0) {
-    const rsiData = ind.rsi.series;
-    const labels = rsiData.map((_, i) => i);
-    charts.rsi.data.labels = labels;
-    charts.rsi.data.datasets[0].data = rsiData;
-    charts.rsi.data.datasets[1].data = rsiData.map(() => 70);
-    charts.rsi.data.datasets[2].data = rsiData.map(() => 30);
-    charts.rsi.update('none');
-  }
-
-  // MACD chart
-  if (ind.macd.series && ind.macd.series.macd) {
-    const m = ind.macd.series;
-    const len = m.macd.length;
-    const labels = m.macd.map((_, i) => i);
-    charts.macd.data.labels = labels;
-    charts.macd.data.datasets[0].data = m.histogram;
-    charts.macd.data.datasets[0].backgroundColor = m.histogram.map(v => v >= 0 ? 'rgba(16,185,129,0.5)' : 'rgba(239,68,68,0.5)');
-    charts.macd.data.datasets[1].data = m.macd;
-    charts.macd.data.datasets[2].data = m.signal;
-    charts.macd.update('none');
-  }
-
-  // ── Pattern ──
-  const pat = data.pattern;
-  $('patternName').textContent = pat.name;
-  $('patternConf').textContent = (pat.confidence * 100).toFixed(0) + '%';
-  updateBadge('patternDir', pat.direction);
-  $('patternRel').textContent = 'Reliability: ' + pat.reliability;
-  $('structSummary').textContent = pat.structure_summary;
-  $('trendSummary2').textContent = pat.trend_summary;
-  $('symmetrySummary').textContent = pat.symmetry_summary;
-
-  // ── Trend ──
-  const tre = data.trend;
-  const tb = $('trendBadge');
-  tb.textContent = tre.classification;
-  tb.className = 'trend-badge ' + tre.classification.toLowerCase().replace(' ', '');
-  $('trendKappa').textContent = tre.kappa.toExponential(3);
-  $('trendMomentum').textContent = tre.momentum_strength;
-  $('trendBreakout').textContent = (tre.breakout_probability * 100).toFixed(0) + '%';
-  $('trendPrediction').textContent = tre.prediction;
-  $('trendReasoning').textContent = tre.reasoning;
-  $('trendSignals').textContent = tre.signals;
-  $('rSlope').textContent = tre.resistance.slope.toFixed(6);
-  $('rDir').textContent = tre.resistance.direction;
-  $('rR2').textContent = 'R²=' + tre.resistance.r_squared.toFixed(3);
-  $('sSlope').textContent = tre.support.slope.toFixed(6);
-  $('sDir').textContent = tre.support.direction;
-  $('sR2').textContent = 'R²=' + tre.support.r_squared.toFixed(3);
-
-  // ── Risk ──
-  const r = data.risk.radar;
-  updateRadar(r, data.risk);
-
-  // ── Charts with OHLC data ──
-  updateCharts(data);
-
-  // ── Price display ──
-  $('priceValue').textContent = d.entry_price.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 4});
-  $('priceAsset').textContent = data.session_info?.asset || 'MARKET';
-  $('priceValue').style.color = d.direction === 'LONG' ? 'var(--green)' : 'var(--red)';
-
-  // Signal summary
-  $('signalSummary').innerHTML = `
-    <div style="display:flex;flex-direction:column;gap:6px">
-      <div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border)">
-        <span style="color:var(--muted);font-family:var(--font-mono);font-size:11px">INDICATOR</span>
-        <span class="ind-signal ${ind.overall.toLowerCase()}">${ind.overall}</span>
-      </div>
-      <div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border)">
-        <span style="color:var(--muted);font-family:var(--font-mono);font-size:11px">PATTERN</span>
-        <span class="ind-signal ${pat.direction.toLowerCase()}">${pat.name}</span>
-      </div>
-      <div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border)">
-        <span style="color:var(--muted);font-family:var(--font-mono);font-size:11px">TREND</span>
-        <span class="ind-signal ${tre.classification === 'Uptrend' ? 'bullish' : tre.classification === 'Downtrend' ? 'bearish' : 'neutral'}">${tre.classification}</span>
-      </div>
-      <div style="display:flex;justify-content:space-between;padding:5px 0">
-        <span style="color:var(--muted);font-family:var(--font-mono);font-size:11px">FINAL SIGNAL</span>
-        <span class="ind-signal ${d.direction === 'LONG' ? 'bullish' : 'bearish'}" style="font-size:12px;font-weight:700">${d.direction}</span>
-      </div>
-    </div>`;
-
-  $('riskWidth').textContent = (data.risk.risk_zone_width * 10000).toFixed(2) + ' bps';
-  $('rewardWidth').textContent = (data.risk.reward_zone_width * 10000).toFixed(2) + ' bps';
-  $('riskScore').textContent = (data.risk.overall_risk_score * 100).toFixed(0) + '%';
-}
-
-function updateIndicator(name, val, signal, desc) {
-  $('v-' + name).textContent = val;
-  const sigEl = $('s-' + name);
-  sigEl.textContent = signal.toUpperCase();
-  sigEl.className = 'ind-signal ' + signal.toLowerCase();
-  if ($('d-' + name)) $('d-' + name).textContent = desc;
-}
-
-function updateBadge(id, direction) {
-  const el = $(id);
-  el.textContent = direction.toUpperCase();
-  const colors = {
-    Bullish: 'background:rgba(16,185,129,.1);color:var(--green);border:1px solid rgba(16,185,129,.3)',
-    Bearish: 'background:rgba(239,68,68,.1);color:var(--red);border:1px solid rgba(239,68,68,.3)',
-    Neutral: 'background:rgba(245,158,11,.1);color:var(--yellow);border:1px solid rgba(245,158,11,.3)'
-  };
-  el.style.cssText = colors[direction] || colors.Neutral;
-}
-
-function updateRadar(r, risk) {
-  const vals = [r.momentum_strength, r.volatility_risk, r.sr_strength, r.breakout_likelihood, r.trend_certainty, r.pattern_reliability];
-  charts.radar.data.datasets[0].data = vals;
-  // Color based on direction
-  const color = risk.direction === 'LONG' ? '16,185,129' : '239,68,68';
-  charts.radar.data.datasets[0].borderColor = `rgb(${color})`;
-  charts.radar.data.datasets[0].backgroundColor = `rgba(${color},0.15)`;
-  charts.radar.data.datasets[0].pointBackgroundColor = `rgb(${color})`;
-  charts.radar.update('none');
-
-  // Bar dims
-  [['ms', r.momentum_strength, '#3b82f6'],
-   ['vr', r.volatility_risk, '#ef4444'],
-   ['sr', r.sr_strength, '#10b981'],
-   ['bl', r.breakout_likelihood, '#f59e0b'],
-   ['tc', r.trend_certainty, '#06b6d4'],
-   ['pr', r.pattern_reliability, '#8b5cf6']
-  ].forEach(([k, v, c]) => {
-    $('rf-' + k).style.width = (v * 100) + '%';
-    $('rf-' + k).style.background = c;
-    $('rv-' + k).textContent = (v * 100).toFixed(0) + '%';
-  });
-}
-
-function updateCharts(data) {
-  const ohlc = data.ohlc;
-  const N = ohlc.n;
-  const labels = ohlc.close.map((_, i) => i);
-
-  // OHLC — simplified bar chart (close vs open)
-  const barData = ohlc.close.map((c, i) => c - ohlc.open[i]);
-  const bgColors = ohlc.close.map((c, i) => c >= ohlc.open[i] ? 'rgba(16,185,129,0.7)' : 'rgba(239,68,68,0.7)');
-  const borders = ohlc.close.map((c, i) => c >= ohlc.open[i] ? '#10b981' : '#ef4444');
-
-  charts.ohlc.data.labels = labels;
-  charts.ohlc.data.datasets[0].data = ohlc.close;
-  charts.ohlc.data.datasets[0].backgroundColor = bgColors;
-  charts.ohlc.data.datasets[0].borderColor = borders;
-  charts.ohlc.update('none');
-
-  // Pattern chart
-  charts.pattern.data.labels = labels;
-  charts.pattern.data.datasets[0].data = ohlc.close;
-  charts.pattern.data.datasets[0].backgroundColor = bgColors;
-  charts.pattern.data.datasets[0].borderColor = borders;
-  charts.pattern.update('none');
-
-  // Trend chart with trendlines
-  const tre = data.trend;
-  const resistSeries = tre.resistance.series;
-  const supportSeries = tre.support.series;
-  const trendN = resistSeries.length;
-  const offset = N - trendN;
-  const trendLabels = ohlc.close.slice(-trendN).map((_, i) => i + offset);
-
-  charts.trend.data.labels = labels;
-  charts.trend.data.datasets[0].data = ohlc.close;
-
-  // Pad trendlines to full length
-  const resistPad = Array(offset).fill(null).concat(resistSeries);
-  const supportPad = Array(offset).fill(null).concat(supportSeries);
-  charts.trend.data.datasets[1].data = resistPad;
-  charts.trend.data.datasets[2].data = supportPad;
-  charts.trend.update('none');
-
-  // Risk chart — show price + levels
-  const entry = data.decision.entry_price;
-  const sl = data.decision.stop_loss;
-  const tp = data.decision.take_profit;
-  charts.risk.data.labels = labels;
-  charts.risk.data.datasets[0].data = ohlc.close;
-  charts.risk.data.datasets[1].data = ohlc.close.map(() => tp);
-  charts.risk.data.datasets[2].data = ohlc.close.map(() => sl);
-  charts.risk.data.datasets[3].data = ohlc.close.map(() => entry);
-  charts.risk.update('none');
-}
-
-function updateAccuracy(acc) {
-  // Overview stats
-  const color = acc.accuracy >= 55 ? 'var(--green)' : acc.accuracy >= 45 ? 'var(--accent2)' : 'var(--red)';
-  $('ov-acc').textContent = acc.accuracy + '%';
-  $('ov-acc').style.color = color;
-  $('ov-rcc').textContent = acc.avg_rcc?.toFixed(4) ?? '—';
-  $('ov-rcc').style.color = (acc.avg_rcc ?? 0) >= 0 ? 'var(--green)' : 'var(--red)';
-  $('ov-lacc').textContent = acc.long_accuracy + '%';
-  $('ov-sacc').textContent = acc.short_accuracy + '%';
-
-  // Accuracy tab
-  $('ac-total').textContent = acc.total_predictions;
-  $('ac-validated').textContent = acc.validated;
-  $('ac-acc').textContent = acc.accuracy + '%';
-  $('ac-avg').textContent = (acc.avg_accuracy_score ?? 0) + '%';
-  $('ac-rcc').textContent = acc.avg_rcc?.toFixed(4) ?? '—';
-  $('ac-rmax').textContent = acc.avg_rmax?.toFixed(4) ?? '—';
-  $('ac-rmin').textContent = acc.avg_rmin?.toFixed(4) ?? '—';
-  $('ac-ls').textContent = acc.long_accuracy + '% / ' + acc.short_accuracy + '%';
-
-  // Update accuracy history chart
-  if (acc.results && acc.results.length > 0) {
-    const results = acc.results;
-    const labels = results.map((_, i) => i + 1);
-    const accVals = results.map(r => r.accuracy_score * 100);
-    const rccVals = results.map(r => r.rcc);
-
-    charts.acc.data.labels = labels;
-    charts.acc.data.datasets[0].data = accVals;
-    charts.acc.update('none');
-
-    charts.accLine.data.labels = labels;
-    charts.accLine.data.datasets[0].data = accVals;
-    charts.accLine.data.datasets[1].data = rccVals;
-    charts.accLine.update('none');
-
-    // Table
-    const tbody = $('predHistBody');
-    tbody.innerHTML = '';
-    [...results].reverse().slice(0, 30).forEach((r, i) => {
-      const tr = document.createElement('tr');
-      const cls = r.correct ? 'correct' : 'wrong';
-      const marker = r.correct ? '✓' : '✗';
-      tr.innerHTML = `
-        <td style="color:var(--muted)">${results.length - i}</td>
-        <td style="color:${r.direction === 'LONG' ? 'var(--green)' : 'var(--red)'}">${r.direction}</td>
-        <td style="font-family:var(--font-mono)">${r.entry_price.toFixed(4)}</td>
-        <td class="${cls}">${marker} ${r.correct ? 'Correct' : 'Wrong'}</td>
-        <td style="font-family:var(--font-mono)">${r.correct_hits}/3</td>
-        <td class="${r.rcc >= 0 ? 'correct' : 'wrong'}">${r.rcc.toFixed(4)}</td>
-        <td style="color:var(--green)">${r.rmax.toFixed(4)}</td>
-        <td style="color:var(--red)">${r.rmin.toFixed(4)}</td>`;
-      tbody.appendChild(tr);
-    });
-  }
-}
-
-// ── API Calls ──
-async function apiCall(url, method = 'GET', body = null) {
-  const opts = { method, headers: { 'Content-Type': 'application/json' } };
-  if (body) opts.body = JSON.stringify(body);
-  const res = await fetch(url, opts);
-  return res.json();
-}
-
-async function initSession() {
-  const btn = $('btnInit');
-  btn.classList.add('loading');
-  btn.textContent = '⚡ Initializing...';
+// ── Market status ──────────────────────────────────────────────────────
+async function checkMarket() {
   try {
-    const asset = $('assetSelect').value;
-    const tf = $('tfSelect').value;
-    sessionId = sessionId || ('session_' + Date.now());
-    const data = await apiCall('/api/init', 'POST', { session_id: sessionId, asset, timeframe: tf });
-    $('priceValue').textContent = data.current_price.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 4});
-    $('priceAsset').textContent = asset;
-    $('barCounter').textContent = '200 bars';
-    const regime = 'INITIALIZED';
-    $('priceRegime').textContent = regime;
-    $('priceRegime').className = 'price-regime side';
-    setStatus('READY', 'var(--green)');
-    log(`Session initialized: ${asset} (${tf}) — ${data.bars_initialized} bars`, 'success');
-  } catch(e) {
-    log('Init failed: ' + e.message, 'error');
-  }
-  btn.classList.remove('loading');
-  btn.textContent = '⚡ Initialize Session';
+    const { is_open } = await (await fetch('/api/market_status')).json();
+    const el = document.getElementById('market-badge');
+    el.textContent = is_open ? 'NSE Open' : 'Market Closed';
+    el.classList.toggle('closed', !is_open);
+  } catch (_) {}
+  setTimeout(checkMarket, 60_000);
 }
 
+// ── API key ────────────────────────────────────────────────────────────
+async function saveKey() {
+  const key = document.getElementById('api-key-in').value.trim();
+  if (!key) { document.getElementById('key-msg').textContent = 'Enter your key first.'; return; }
+  const res  = await fetch('/api/set_api_key', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ api_key: key }),
+  });
+  const data = await res.json();
+  const msg  = document.getElementById('key-msg');
+  if (data.llm_enabled) {
+    msg.textContent = '✓ Key saved — LLM analysis enabled.';
+    msg.style.color = 'var(--green)';
+    document.getElementById('llm-status').textContent = 'LLM: ON';
+    document.getElementById('llm-status').classList.remove('llm-off');
+    document.getElementById('api-key-in').value = '';
+  } else {
+    msg.textContent = 'Error: ' + (data.error || 'Unknown');
+    msg.style.color = 'var(--red)';
+  }
+}
+
+// ── Chart ──────────────────────────────────────────────────────────────
+function buildChart() {
+  S.chart = new Chart(
+    document.getElementById('price-chart').getContext('2d'),
+    {
+      type: 'line',
+      data: { labels: [], datasets: [{
+        label: 'Close', data: [],
+        borderColor: '#3b82f6', borderWidth: 1.5,
+        pointRadius: 0, tension: 0.3,
+        fill: { target: 'origin', above: 'rgba(59,130,246,0.06)' },
+      }]},
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { ticks: { color:'#555', maxTicksLimit:8, font:{size:10} }, grid:{color:'#1f2937'} },
+          y: { ticks: { color:'#555', font:{size:10} }, grid:{color:'#1f2937'} },
+        },
+      },
+    }
+  );
+}
+
+function pushChart(ohlc, sym) {
+  if (!ohlc?.close) return;
+  document.getElementById('chart-sym').textContent = sym || S.symbol;
+  S.chart.data.labels = ohlc.close.map((_,i) => i % 10 === 0 ? i : '');
+  S.chart.data.datasets[0].data = ohlc.close;
+  S.chart.update('none');
+}
+
+// ── Analysis ───────────────────────────────────────────────────────────
 async function runAnalysis() {
-  if (!sessionId) { await initSession(); }
-  const btn = $('btnAnalyze');
-  btn.classList.add('loading');
-  btn.textContent = '🔍 Analyzing...';
-  setStatus('ANALYZING', 'var(--yellow)');
+  S.symbol   = document.getElementById('symbol-sel').value;
+  S.interval = document.getElementById('tf-sel').value;
+  S.period   = document.getElementById('period-sel').value;
+
+  const btn = document.getElementById('analyze-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Analysing…';
+  setStatus('Fetching ' + S.symbol + ' data and running agents…');
+
   try {
-    const asset = $('assetSelect').value;
-    const tf = $('tfSelect').value;
-    const data = await apiCall('/api/analyze', 'POST', {
-      session_id: sessionId, asset, timeframe: tf
+    const res = await fetch('/api/analyze', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({
+        symbol: S.symbol, interval: S.interval,
+        period: S.period, session_id: S.sessionId,
+      }),
     });
-    if (data.error) { log('Error: ' + data.error, 'error'); return; }
-    updateUI(data);
-    log(`Analysis complete: ${data.decision.direction} @ ${data.decision.entry_price.toFixed(4)} (conf: ${(data.decision.confidence*100).toFixed(0)}%) — ${data.elapsed_ms}ms`, 'success');
-    setStatus('ACTIVE', 'var(--green)');
-    $('barCounter').textContent = data.ohlc.n + ' bars';
-    $('priceRegime').textContent = data.trend.classification.toUpperCase();
-    $('priceRegime').className = 'price-regime ' + ({'Uptrend': 'up', 'Downtrend': 'down', 'Sideways': 'side', 'Volatile': 'vol'}[data.trend.classification] || 'side');
-  } catch(e) {
-    log('Analysis failed: ' + e.message, 'error');
-    setStatus('ERROR', 'var(--red)');
+    const data = await res.json();
+    if (data.error) { setStatus('Error: ' + data.error); return; }
+    renderResult(data);
+    refreshAccuracy();
+    setStatus(`Done in ${data.elapsed_ms} ms · LLM: ${data.llm_used ? 'ON ✦' : 'OFF'}`);
+  } catch (e) {
+    setStatus('Request failed: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '▶ Analyse Now';
   }
-  btn.classList.remove('loading');
-  btn.textContent = '🔍 Run Analysis';
 }
 
-async function nextTick() {
-  if (!sessionId) return;
-  try {
-    const data = await apiCall('/api/tick', 'POST', { session_id: sessionId });
-    const bar = data.new_bar;
-    const price = data.current_price;
-    $('priceValue').textContent = price.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 4});
-    $('barCounter').textContent = data.total_bars + ' bars';
-    const regime = bar.regime || 'Unknown';
-    $('priceRegime').textContent = regime.toUpperCase();
-    $('priceRegime').className = 'price-regime ' + ({'Uptrend': 'up', 'Downtrend': 'down', 'Sideways': 'side', 'Volatile': 'vol'}[regime] || 'side');
-    updateAccuracy(data.accuracy);
-    log(`Bar: O=${bar.open.toFixed(4)} H=${bar.high.toFixed(4)} L=${bar.low.toFixed(4)} C=${bar.close.toFixed(4)} [${regime}]`);
-  } catch(e) {
-    log('Tick failed: ' + e.message, 'error');
+// ── Render analysis result ─────────────────────────────────────────────
+function renderResult(d) {
+  const dec = d.decision;
+  const dir = dec.direction; // 'LONG' or 'SHORT'
+
+  // Banner
+  const banner = document.getElementById('decision-banner');
+  banner.className = 'card ' + dir.toLowerCase();
+  const badge = document.getElementById('dir-badge');
+  badge.textContent = dir;
+  badge.className = 'dir-badge ' + dir.toLowerCase();
+
+  document.getElementById('d-horizon').textContent = dec.forecast_horizon;
+  document.getElementById('d-justify').textContent = dec.justification;
+  document.getElementById('d-watch').textContent   = dec.llm_watch_for ? '⚠ ' + dec.llm_watch_for : '';
+  const confEl = document.getElementById('d-conf');
+  confEl.textContent = (dec.confidence * 100).toFixed(0) + '%';
+  confEl.className = 'conf-val ' + (dir === 'LONG' ? 'bull' : 'bear');
+
+  const fmt = v => '₹' + Number(v).toLocaleString('en-IN', {maximumFractionDigits:2});
+  document.getElementById('d-entry').textContent = fmt(dec.entry_price);
+  document.getElementById('d-sl').textContent    = fmt(dec.stop_loss);
+  document.getElementById('d-tp').textContent    = fmt(dec.take_profit);
+
+  // Indicators
+  const ind = d.indicators;
+  const sigCls = s => s==='Bullish'?'sig-bull':s==='Bearish'?'sig-bear':'sig-neu';
+  const rows = [
+    {name:'RSI',   val:ind.rsi.value.toFixed(1),   sig:ind.rsi.signal},
+    {name:'MACD',  val:ind.macd.value.toFixed(4),  sig:ind.macd.signal},
+    {name:'ROC',   val:ind.roc.value.toFixed(3),   sig:ind.roc.signal},
+    {name:'STOCH', val:ind.stoch.value.toFixed(1), sig:ind.stoch.signal},
+    {name:'WILLR', val:ind.willr.value.toFixed(1), sig:ind.willr.signal},
+  ];
+  document.getElementById('ind-list').innerHTML = rows.map(r =>
+    `<div class="ind-item">
+      <span class="ind-name">${r.name}</span>
+      <span class="ind-val">${r.val}</span>
+      <span class="ind-sig ${sigCls(r.sig)}">${r.sig}</span>
+    </div>`
+  ).join('');
+  const oc = ind.overall==='Bullish'?'bull':ind.overall==='Bearish'?'bear':'neutral';
+  document.getElementById('ind-overall').innerHTML = `<span class="${oc}">${ind.overall}</span>`;
+  document.getElementById('ind-summary').textContent = ind.summary;
+
+  // Pattern
+  const pat = d.pattern;
+  const pc = pat.direction==='Bullish'?'bull':pat.direction==='Bearish'?'bear':'neutral';
+  document.getElementById('pat-name').textContent = pat.name;
+  document.getElementById('pat-dir').innerHTML    = `<span class="${pc}">${pat.direction}</span>`;
+  document.getElementById('pat-conf').textContent = (pat.confidence*100).toFixed(0)+'%';
+  document.getElementById('pat-struct').textContent = pat.structure_summary;
+
+  if (pat.llm_confirmed) {
+    document.getElementById('llm-pat-block').hidden = false;
+    document.getElementById('llm-pat-name').textContent   = pat.llm_confirmed;
+    document.getElementById('llm-pat-struct').textContent = pat.llm_structure;
+  } else {
+    document.getElementById('llm-pat-block').hidden = true;
   }
+
+  // Trend
+  const tre = d.trend;
+  const tc = tre.classification==='Uptrend'?'bull':tre.classification==='Downtrend'?'bear':'neutral';
+  document.getElementById('tre-cls').innerHTML   = `<span class="${tc}">${tre.classification}</span>`;
+  document.getElementById('tre-kappa').textContent = tre.kappa.toExponential(2);
+  document.getElementById('tre-brk').textContent  = (tre.breakout_probability*100).toFixed(0)+'%';
+  document.getElementById('tre-cw').textContent   = tre.channel_width.toFixed(2);
+  document.getElementById('tre-pred').textContent = tre.prediction;
+
+  // Risk
+  const rsk = d.risk;
+  document.getElementById('rsk-rr').textContent    = rsk.risk_reward_ratio.toFixed(2);
+  document.getElementById('rsk-entry').textContent = fmt(rsk.entry_price);
+  document.getElementById('rsk-sl').textContent    = fmt(rsk.stop_loss);
+  document.getElementById('rsk-tp').textContent    = fmt(rsk.take_profit);
+  document.getElementById('rsk-score').textContent = (rsk.overall_risk_score*100).toFixed(0)+'%';
+
+  // Price widget
+  const latest = d.ohlc.close[d.ohlc.close.length-1];
+  document.getElementById('price-big').textContent = fmt(latest);
+  document.getElementById('price-time').textContent = new Date().toLocaleTimeString('en-IN');
+
+  // LLM indicator
+  document.getElementById('llm-status').textContent = d.llm_enabled ? 'LLM: ON' : 'LLM: OFF';
+  document.getElementById('llm-status').classList.toggle('llm-off', !d.llm_enabled);
+
+  pushChart(d.ohlc, d.symbol);
 }
+
+// ── Accuracy ───────────────────────────────────────────────────────────
+async function refreshAccuracy() {
+  const data = await (await fetch(`/api/accuracy?session_id=${S.sessionId}`)).json();
+  document.getElementById('acc-pct').textContent   = data.accuracy_pct != null ? data.accuracy_pct.toFixed(1)+'%' : '—';
+  document.getElementById('acc-total').textContent = data.total || 0;
+  document.getElementById('acc-rcc').textContent   = data.avg_rcc != null ? data.avg_rcc.toFixed(4) : '—';
+}
+
+// ── Streaming ──────────────────────────────────────────────────────────
+function toggleStream() { S.streaming ? stopStream() : startStream(); }
 
 function startStream() {
-  if (!sessionId) { initSession().then(() => startStream()); return; }
-  if (eventSource) eventSource.close();
-
-  const asset = $('assetSelect').value;
-  const tf = $('tfSelect').value;
-  eventSource = new EventSource(`/api/stream?session_id=${sessionId}&asset=${asset}&timeframe=${tf}`);
-
-  $('btnStartStream').style.display = 'none';
-  $('btnStopStream').style.display = 'block';
-  setStatus('STREAMING', 'var(--green)');
-  log('Live feed started', 'info');
-
-  eventSource.onmessage = e => {
-    const data = JSON.parse(e.data);
-    if (data.type === 'error') { log('Stream error: ' + data.message, 'error'); return; }
-
-    const bar = data.bar;
-    if (bar) {
-      $('priceValue').textContent = data.current_price.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 4});
-      $('barCounter').textContent = data.bar_count + ' bars';
-      const regime = bar.regime || '';
-      $('priceRegime').textContent = regime.toUpperCase() || 'LIVE';
-      $('priceRegime').className = 'price-regime ' + ({'Uptrend': 'up', 'Downtrend': 'down', 'Sideways': 'side', 'Volatile': 'vol'}[regime] || 'side');
+  S.symbol   = document.getElementById('symbol-sel').value;
+  S.interval = document.getElementById('tf-sel').value;
+  const url  = `/api/stream?symbol=${S.symbol}&interval=${S.interval}&session_id=${S.sessionId}`;
+  S.evtSource = new EventSource(url);
+  S.evtSource.onmessage = e => {
+    const ev = JSON.parse(e.data);
+    if (ev.price) {
+      document.getElementById('price-big').textContent = '₹' + Number(ev.price).toLocaleString('en-IN',{maximumFractionDigits:2});
+      document.getElementById('price-time').textContent = new Date().toLocaleTimeString('en-IN');
     }
-
-    if (data.accuracy) updateAccuracy(data.accuracy);
-
-    if (data.type === 'analysis' && data.analysis) {
-      updateUI(data.analysis);
-      log(`AUTO-ANALYSIS: ${data.analysis.decision.direction} @ ${data.analysis.decision.entry_price.toFixed(4)} | conf: ${(data.analysis.decision.confidence*100).toFixed(0)}% | pattern: ${data.analysis.pattern.name}`, 'success');
-    } else if (bar) {
-      log(`New bar: C=${data.current_price.toFixed(4)} [${bar.regime || ''}]`);
-    }
+    if (ev.type === 'analysis' && ev.analysis) { renderResult(ev.analysis); refreshAccuracy(); }
+    if (ev.type === 'error') setStatus('Stream error: ' + ev.message);
   };
-
-  eventSource.onerror = () => {
-    log('Stream disconnected', 'warn');
-    setStatus('DISCONNECTED', 'var(--red)');
-  };
+  S.streaming = true;
+  document.getElementById('stream-btn').textContent = '⏹ Stop Stream';
+  setStatus('Streaming live ticks from NSE…');
 }
 
 function stopStream() {
-  if (eventSource) { eventSource.close(); eventSource = null; }
-  $('btnStartStream').style.display = 'block';
-  $('btnStopStream').style.display = 'none';
-  setStatus('STOPPED', 'var(--muted)');
-  log('Live feed stopped', 'warn');
+  S.evtSource?.close();
+  S.streaming = false;
+  document.getElementById('stream-btn').textContent = '⏵ Live Stream';
+  setStatus('Stream stopped.');
 }
 
+// ── Backtest ───────────────────────────────────────────────────────────
 async function runBacktest() {
-  const btn = $('btnBacktest');
-  btn.classList.add('loading');
-  btn.textContent = '⏳ Backtesting...';
-  setStatus('BACKTESTING', 'var(--yellow)');
-  try {
-    const asset = $('assetSelect').value;
-    const nBars = parseInt($('btBars').value);
-    const tf = $('tfSelect').value;
-    const data = await apiCall('/api/backtest', 'POST', {
-      asset, n_bars: nBars, timeframe: tf, analysis_every: 10
-    });
-    const s = data.backtest_summary;
-    log(`BACKTEST COMPLETE: ${s.accuracy}% accuracy | ${s.validated} validated | Rcc=${s.avg_rcc?.toFixed(4)} | Rmax=${s.avg_rmax?.toFixed(4)}`, 'success');
-    updateAccuracy(s);
-
-    // Switch to accuracy tab
-    document.querySelector('[data-tab="accuracy"]').click();
-    setStatus('READY', 'var(--green)');
-  } catch(e) {
-    log('Backtest failed: ' + e.message, 'error');
-  }
-  btn.classList.remove('loading');
-  btn.textContent = '📊 Run Backtest';
-}
-
-async function generateCharts() {
-  if (!sessionId) { log('Init session first', 'warn'); return; }
-  const btn = $('btnGenCharts');
-  btn.classList.add('loading');
-  btn.textContent = '⏳ Generating...';
-  $('chartStatus').textContent = 'Running agents + rendering matplotlib charts...';
-  try {
-    const asset = $('assetSelect').value;
-    const tf = $('tfSelect').value;
-    const data = await apiCall('/api/charts', 'POST', { session_id: sessionId, asset, timeframe: tf });
-    if (data.error) { log('Chart error: ' + data.error, 'error'); return; }
-
-    const slots = {
-      indicator: 'chartIndicator',
-      pattern:   'chartPattern',
-      trend:     'chartTrend',
-      risk:      'chartRisk'
-    };
-    let generated = 0;
-    for (const [key, elId] of Object.entries(slots)) {
-      const b64 = data.charts[key];
-      const el = $(elId);
-      if (b64) {
-        el.innerHTML = `<img src="data:image/png;base64,${b64}" style="width:100%;border-radius:6px;display:block" alt="${key} chart">`;
-        generated++;
-      } else {
-        el.innerHTML = `<span style="color:var(--red)">Chart generation failed</span>`;
-      }
-    }
-    $('chartStatus').textContent = `✓ ${generated}/4 charts generated`;
-    log(`Charts generated: ${generated}/4 agent charts rendered`, 'success');
-    // Also update main analysis UI
-    if (data.analysis) updateUI(data.analysis);
-  } catch(e) {
-    log('Chart generation failed: ' + e.message, 'error');
-    $('chartStatus').textContent = 'Error: ' + e.message;
-  }
-  btn.classList.remove('loading');
-  btn.textContent = '🎨 Generate Agent Charts';
-}
-
-// ── Tab switching ──
-document.querySelectorAll('.tab').forEach(tab => {
-  tab.addEventListener('click', () => {
-    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-    tab.classList.add('active');
-    const id = 'tab-' + tab.dataset.tab;
-    $(id)?.classList.add('active');
-    // Resize charts in newly visible tab
-    setTimeout(() => Object.values(charts).forEach(c => c?.resize?.()), 50);
+  S.symbol   = document.getElementById('symbol-sel').value;
+  S.interval = document.getElementById('tf-sel').value;
+  setStatus('Running backtest on 1-month history…');
+  const res  = await fetch('/api/backtest', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ symbol: S.symbol, interval: S.interval, period: '1mo' }),
   });
-});
+  const data = await res.json();
+  if (data.error) { setStatus('Backtest error: ' + data.error); return; }
+  const s = data.backtest_summary;
+  const card = document.getElementById('bt-card');
+  card.hidden = false;
+  document.getElementById('bt-body').innerHTML = `
+    <div class="acc-grid" style="grid-template-columns:repeat(4,1fr)">
+      <div class="acc-cell"><div class="val">${data.total_bars}</div><div class="lbl">Bars</div></div>
+      <div class="acc-cell"><div class="val">${data.predictions_made.length}</div><div class="lbl">Signals</div></div>
+      <div class="acc-cell"><div class="val bull">${(s.accuracy_pct||0).toFixed(1)}%</div><div class="lbl">Accuracy</div></div>
+      <div class="acc-cell"><div class="val">${(s.avg_rcc||0).toFixed(4)}</div><div class="lbl">Avg&nbsp;Rcc</div></div>
+    </div>`;
+  setStatus(`Backtest done — ${data.predictions_made.length} signals over ${data.total_bars} bars.`);
+}
 
-// ── Button listeners ──
-$('btnInit').addEventListener('click', initSession);
-$('btnAnalyze').addEventListener('click', runAnalysis);
-$('btnTick').addEventListener('click', nextTick);
-$('btnStartStream').addEventListener('click', startStream);
-$('btnStopStream').addEventListener('click', stopStream);
-$('btnBacktest').addEventListener('click', runBacktest);
-$('btnGenCharts').addEventListener('click', generateCharts);
-
-// ── Init ──
-document.addEventListener('DOMContentLoaded', () => {
-  initCharts();
-  sessionId = 'session_' + Date.now();
-  log('QuantAgent Multi-Agent HFT System ready', 'info');
-  log('Press "Initialize Session" to begin', 'info');
-});
+// ── Status ─────────────────────────────────────────────────────────────
+function setStatus(msg) { document.getElementById('statusbar').textContent = msg; }
 </script>
 </body>
 </html>

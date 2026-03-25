@@ -1,40 +1,44 @@
 """
-LLM Client for QuantAgent
-Wraps the Anthropic Claude API (claude-haiku-4-5 by default).
-Falls back gracefully to None when no API key is provided.
+LLM Client for QuantAgent — supports Anthropic Claude and Google Gemini.
 
-Token-saving strategies implemented here:
-  - Use claude-haiku-4-5-20251001 (cheapest model, fast)
-  - Short, focused prompts
-  - max_tokens capped at 512 for pattern + 768 for decision
-  - Skip LLM entirely when api_key is None
+Provider detection:
+  - key starts with "sk-ant-"  → Anthropic Claude (claude-haiku-4-5-20251001)
+  - key starts with "AIza"     → Google Gemini   (gemini-2.0-flash, free tier)
+
+Token-saving strategies:
+  - Cheapest model per provider (haiku / flash)
+  - max_tokens capped at 512 (pattern) and 768 (decision)
+  - LLM skipped entirely when no key is set
 """
 
 from __future__ import annotations
 import base64
-import io
 import json
 from typing import Optional
 
 try:
-    import anthropic
+    import anthropic as _ant
     _ANTHROPIC_OK = True
 except ImportError:
     _ANTHROPIC_OK = False
 
-# Default model — cheapest Claude model (haiku)
-DEFAULT_MODEL = "claude-haiku-4-5-20251001"
+try:
+    from google import genai as _genai
+    from google.genai import types as _gtypes
+    _GEMINI_OK = True
+except ImportError:
+    _GEMINI_OK = False
 
-# ── Prompt templates ─────────────────────────────────────────────────────
+# ── Prompt templates (shared between providers) ───────────────────────────
 
 PATTERN_PROMPT = """You are a chart-pattern expert for Indian equity markets (NSE/Nifty 50).
 A {timeframe} candlestick chart of {symbol} is attached.
 
-The algorithmic pre-scan detected: **{algo_pattern}** (confidence {confidence:.0%}).
+Algorithmic pre-scan detected: {algo_pattern} (confidence {confidence:.0%}).
 
-Examine the chart and answer concisely in JSON only (no markdown):
+Examine the chart and reply in JSON only (no markdown fence):
 {{
-  "confirmed_pattern": "<pattern name or 'None'>",
+  "confirmed_pattern": "<pattern name or None>",
   "direction": "<Bullish|Bearish|Neutral>",
   "structure": "<one sentence on highs/lows/shape>",
   "trend_context": "<one sentence on surrounding trend>",
@@ -42,51 +46,68 @@ Examine the chart and answer concisely in JSON only (no markdown):
   "confidence": <0.0-1.0>
 }}"""
 
-DECISION_PROMPT = """You are a high-frequency trading analyst for NSE Indian equities.
-Asset: {symbol} | Timeframe: {timeframe} | Entry price: ₹{entry:.2f}
+DECISION_PROMPT = """You are an HFT analyst for NSE Indian equities.
+Asset: {symbol} | Timeframe: {timeframe} | Entry: ₹{entry:.2f}
 
-Upstream agent summary:
-- Indicators  : {indicator_overall} (RSI {rsi:.1f}, MACD {macd:.4f})
-- Pattern     : {pattern_name} ({pattern_dir}, conf {pattern_conf:.0%})
-- Trend       : {trend} (κ={kappa:.5f}, breakout_prob {breakout:.0%})
-- Risk/Reward : {rr_ratio:.2f} | Stop ₹{sl:.2f} | Target ₹{tp:.2f}
+Agent signals:
+- Indicators : {indicator_overall} (RSI {rsi:.1f}, MACD {macd:.4f})
+- Pattern    : {pattern_name} ({pattern_dir}, conf {pattern_conf:.0%})
+- Trend      : {trend} (κ={kappa:.5f}, breakout_prob {breakout:.0%})
+- Risk/Reward: {rr_ratio:.2f} | SL ₹{sl:.2f} | TP ₹{tp:.2f}
 
-You MUST choose LONG or SHORT (no HOLD).
-Forecast horizon: next 3 × {timeframe} bars (~{horizon_min} minutes).
+Choose LONG or SHORT (no HOLD). Horizon: next 3×{timeframe} (~{horizon_min} min).
 
-Reply in JSON only (no markdown):
+Reply in JSON only (no markdown fence):
 {{
   "decision": "<LONG|SHORT>",
-  "justification": "<2-3 sentences citing the strongest signals>",
+  "justification": "<2-3 sentences citing strongest signals>",
   "risk_reward_ratio": <1.2-1.8>,
-  "watch_for": "<one invalidation signal to monitor>"
+  "watch_for": "<one invalidation signal>"
 }}"""
+
+
+def _detect_provider(api_key: str) -> str:
+    """Return 'anthropic', 'gemini', or 'unknown'."""
+    if api_key.startswith("sk-ant-"):
+        return "anthropic"
+    if api_key.startswith("AIza"):
+        return "gemini"
+    return "unknown"
 
 
 class LLMClient:
     """
-    Thin wrapper around the Anthropic Messages API.
+    Unified LLM client. Automatically selects the backend from the key prefix.
 
     Usage:
-        client = LLMClient(api_key="sk-ant-...")
-        pattern_json = client.analyze_pattern(chart_png_bytes, ...)
-        decision_json = client.synthesize_decision(...)
+        client = LLMClient(api_key="AIza...")        # Gemini
+        client = LLMClient(api_key="sk-ant-...")     # Claude
+        result = client.analyze_pattern(png_bytes, ...)
+        result = client.synthesize_decision(...)
     """
 
-    def __init__(self, api_key: Optional[str] = None,
-                 model: str = DEFAULT_MODEL):
-        self.api_key = api_key
-        self.model = model
-        self._client: Optional["anthropic.Anthropic"] = None
+    def __init__(self, api_key: Optional[str] = None):
+        self.api_key  = api_key
+        self.provider = "none"
+        self._ant     = None   # anthropic.Anthropic instance
+        self._gem     = None   # google.genai.Client instance
 
-        if api_key and _ANTHROPIC_OK:
-            self._client = anthropic.Anthropic(api_key=api_key)
+        if not api_key:
+            return
+
+        self.provider = _detect_provider(api_key)
+
+        if self.provider == "anthropic" and _ANTHROPIC_OK:
+            self._ant = _ant.Anthropic(api_key=api_key)
+
+        elif self.provider == "gemini" and _GEMINI_OK:
+            self._gem = _genai.Client(api_key=api_key)
 
     @property
     def available(self) -> bool:
-        return self._client is not None
+        return self._ant is not None or self._gem is not None
 
-    # ── Pattern analysis (multimodal) ────────────────────────────────────
+    # ── Public API ────────────────────────────────────────────────────────
 
     def analyze_pattern(
         self,
@@ -96,99 +117,106 @@ class LLMClient:
         algo_pattern: str,
         algo_confidence: float,
     ) -> dict:
-        """
-        Send a chart image to Claude and get pattern recognition JSON back.
-        Returns the parsed dict, or {} if LLM unavailable.
-        """
-        if not self.available:
-            return {}
-
-        b64 = base64.standard_b64encode(chart_png_bytes).decode("utf-8")
         prompt = PATTERN_PROMPT.format(
-            timeframe=timeframe,
-            symbol=symbol,
-            algo_pattern=algo_pattern,
-            confidence=algo_confidence,
+            timeframe=timeframe, symbol=symbol,
+            algo_pattern=algo_pattern, confidence=algo_confidence,
         )
-
-        try:
-            response = self._client.messages.create(
-                model=self.model,
-                max_tokens=512,
-                messages=[{
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "image",
-                            "source": {
-                                "type": "base64",
-                                "media_type": "image/png",
-                                "data": b64,
-                            },
-                        },
-                        {"type": "text", "text": prompt},
-                    ],
-                }],
-            )
-            raw = response.content[0].text.strip()
-            return json.loads(raw)
-        except Exception as exc:
-            return {"error": str(exc)}
-
-    # ── Decision synthesis (text only) ───────────────────────────────────
+        if self._ant:
+            return self._ant_vision(chart_png_bytes, prompt)
+        if self._gem:
+            return self._gem_vision(chart_png_bytes, prompt)
+        return {}
 
     def synthesize_decision(
         self,
-        symbol: str,
-        timeframe: str,
-        entry: float,
-        indicator_overall: str,
-        rsi: float,
-        macd: float,
-        pattern_name: str,
-        pattern_dir: str,
-        pattern_conf: float,
-        trend: str,
-        kappa: float,
-        breakout_prob: float,
-        rr_ratio: float,
-        sl: float,
-        tp: float,
+        symbol: str, timeframe: str, entry: float,
+        indicator_overall: str, rsi: float, macd: float,
+        pattern_name: str, pattern_dir: str, pattern_conf: float,
+        trend: str, kappa: float, breakout_prob: float,
+        rr_ratio: float, sl: float, tp: float,
         horizon_min: int = 45,
     ) -> dict:
-        """
-        Ask Claude to synthesize a final LONG/SHORT decision.
-        Returns parsed dict, or {} if LLM unavailable.
-        """
-        if not self.available:
-            return {}
-
         prompt = DECISION_PROMPT.format(
-            symbol=symbol,
-            timeframe=timeframe,
-            entry=entry,
-            indicator_overall=indicator_overall,
-            rsi=rsi,
-            macd=macd,
-            pattern_name=pattern_name,
-            pattern_dir=pattern_dir,
-            pattern_conf=pattern_conf,
-            trend=trend,
-            kappa=kappa,
-            breakout=breakout_prob,
-            rr_ratio=rr_ratio,
-            sl=sl,
-            tp=tp,
+            symbol=symbol, timeframe=timeframe, entry=entry,
+            indicator_overall=indicator_overall, rsi=rsi, macd=macd,
+            pattern_name=pattern_name, pattern_dir=pattern_dir,
+            pattern_conf=pattern_conf, trend=trend, kappa=kappa,
+            breakout=breakout_prob, rr_ratio=rr_ratio, sl=sl, tp=tp,
             horizon_min=horizon_min,
         )
+        if self._ant:
+            return self._ant_text(prompt)
+        if self._gem:
+            return self._gem_text(prompt)
+        return {}
 
+    # ── Anthropic backend ─────────────────────────────────────────────────
+
+    def _ant_vision(self, png: bytes, prompt: str) -> dict:
+        b64 = base64.standard_b64encode(png).decode()
         try:
-            response = self._client.messages.create(
-                model=self.model,
+            resp = self._ant.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=512,
+                messages=[{"role": "user", "content": [
+                    {"type": "image",
+                     "source": {"type": "base64", "media_type": "image/png", "data": b64}},
+                    {"type": "text", "text": prompt},
+                ]}],
+            )
+            return json.loads(resp.content[0].text.strip())
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _ant_text(self, prompt: str) -> dict:
+        try:
+            resp = self._ant.messages.create(
+                model="claude-haiku-4-5-20251001",
                 max_tokens=768,
                 messages=[{"role": "user", "content": prompt}],
             )
-            raw = response.content[0].text.strip()
-            return json.loads(raw)
-        except Exception as exc:
-            return {"error": str(exc)}
+            return json.loads(resp.content[0].text.strip())
+        except Exception as e:
+            return {"error": str(e)}
+
+    # ── Gemini backend ────────────────────────────────────────────────────
+
+    def _gem_vision(self, png: bytes, prompt: str) -> dict:
+        try:
+            img_part = _gtypes.Part.from_bytes(data=png, mime_type="image/png")
+            resp = self._gem.models.generate_content(
+                model="gemini-2.0-flash",
+                contents=[img_part, prompt],
+                config=_gtypes.GenerateContentConfig(
+                    max_output_tokens=512,
+                    temperature=0.2,
+                ),
+            )
+            raw = resp.text.strip()
+            # Strip markdown fences if model adds them
+            if raw.startswith("```"):
+                raw = raw.split("```")[1]
+                if raw.startswith("json"):
+                    raw = raw[4:]
+            return json.loads(raw.strip())
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _gem_text(self, prompt: str) -> dict:
+        try:
+            resp = self._gem.models.generate_content(
+                model="gemini-2.0-flash",
+                contents=prompt,
+                config=_gtypes.GenerateContentConfig(
+                    max_output_tokens=768,
+                    temperature=0.2,
+                ),
+            )
+            raw = resp.text.strip()
+            if raw.startswith("```"):
+                raw = raw.split("```")[1]
+                if raw.startswith("json"):
+                    raw = raw[4:]
+            return json.loads(raw.strip())
+        except Exception as e:
+            return {"error": str(e)}

@@ -92,10 +92,14 @@ def set_api_key():
     key = data.get("api_key", "").strip()
     if not key:
         return jsonify({"error": "api_key is required"}), 400
-    if not key.startswith("sk-ant-"):
-        return jsonify({"error": "Invalid key format — must start with sk-ant-"}), 400
+    if key.startswith("sk-ant-"):
+        provider = "anthropic"
+    elif key.startswith("AIza"):
+        provider = "gemini"
+    else:
+        return jsonify({"error": "Unrecognised key format. Use sk-ant-... (Claude) or AIza... (Gemini)"}), 400
     session["api_key"] = key
-    return jsonify({"status": "ok", "llm_enabled": True})
+    return jsonify({"status": "ok", "llm_enabled": True, "provider": provider})
 
 
 @app.route('/api/analyze', methods=['POST'])
@@ -305,4 +309,4 @@ def backtest():
 
 if __name__ == '__main__':
     print("QuantAgent Nifty 50 — starting on http://localhost:5000")
-    app.run(debug=True, host='0.0.0.0', port=5000, threaded=True)
+    app.run(debug=True, host='0.0.0.0', port=3000, threaded=True)

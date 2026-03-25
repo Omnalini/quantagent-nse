@@ -159,9 +159,9 @@ button:disabled{opacity:.45;cursor:not-allowed}
 
     <!-- API Key input -->
     <div class="card">
-      <div class="card-title">Claude API Key <span style="color:var(--muted)">(optional)</span></div>
-      <label>Enhances pattern &amp; decision reasoning</label>
-      <input type="password" id="api-key-in" placeholder="sk-ant-..."/>
+      <div class="card-title">LLM API Key <span style="color:var(--muted)">(optional)</span></div>
+      <label>Claude (sk-ant-...) or Gemini (AIza...)</label>
+      <input type="password" id="api-key-in" placeholder="sk-ant-... or AIza..."/>
       <button class="secondary" style="margin-top:8px" onclick="saveKey()">Save Key</button>
       <div id="key-msg" style="font-size:10px;color:var(--muted);margin-top:6px"></div>
     </div>
@@ -342,8 +342,25 @@ const S = {
   await loadStocks();
   buildChart();
   checkMarket();
+  refreshPrice();          // independent 1m quote, unaffected by timeframe
+  setInterval(refreshPrice, 60_000);
   setStatus('Ready.');
 })();
+
+// ── Live price (always 1m, ignores analysis timeframe/period) ──────────
+async function refreshPrice() {
+  const sym = document.getElementById('symbol-sel').value || S.symbol;
+  try {
+    const res = await fetch(`/api/quote?symbol=${sym}&interval=1m&period=1d&n=1`);
+    const data = await res.json();
+    if (data.latest_price) {
+      document.getElementById('price-big').textContent =
+        '₹' + Number(data.latest_price).toLocaleString('en-IN', {maximumFractionDigits:2});
+      document.getElementById('price-time').textContent =
+        new Date().toLocaleTimeString('en-IN');
+    }
+  } catch (_) {}
+}
 
 // ── Stock list ─────────────────────────────────────────────────────────
 async function loadStocks() {
@@ -357,7 +374,7 @@ async function loadStocks() {
     if (s.symbol === S.symbol) opt.selected = true;
     sel.appendChild(opt);
   });
-  sel.addEventListener('change', () => { S.symbol = sel.value; });
+  sel.addEventListener('change', () => { S.symbol = sel.value; refreshPrice(); });
 }
 
 // ── Market status ──────────────────────────────────────────────────────
@@ -382,10 +399,12 @@ async function saveKey() {
   const data = await res.json();
   const msg  = document.getElementById('key-msg');
   if (data.llm_enabled) {
-    msg.textContent = '✓ Key saved — LLM analysis enabled.';
+    const label = data.provider === 'gemini' ? 'Gemini' : 'Claude';
+    msg.textContent = `✓ ${label} key saved — LLM enabled.`;
     msg.style.color = 'var(--green)';
-    document.getElementById('llm-status').textContent = 'LLM: ON';
-    document.getElementById('llm-status').classList.remove('llm-off');
+    const badge = document.getElementById('llm-status');
+    badge.textContent = `LLM: ${label}`;
+    badge.classList.remove('llm-off');
     document.getElementById('api-key-in').value = '';
   } else {
     msg.textContent = 'Error: ' + (data.error || 'Unknown');
@@ -534,11 +553,6 @@ function renderResult(d) {
   document.getElementById('rsk-sl').textContent    = fmt(rsk.stop_loss);
   document.getElementById('rsk-tp').textContent    = fmt(rsk.take_profit);
   document.getElementById('rsk-score').textContent = (rsk.overall_risk_score*100).toFixed(0)+'%';
-
-  // Price widget
-  const latest = d.ohlc.close[d.ohlc.close.length-1];
-  document.getElementById('price-big').textContent = fmt(latest);
-  document.getElementById('price-time').textContent = new Date().toLocaleTimeString('en-IN');
 
   // LLM indicator
   document.getElementById('llm-status').textContent = d.llm_enabled ? 'LLM: ON' : 'LLM: OFF';

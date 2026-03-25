@@ -85,25 +85,6 @@ class QuantAgent:
         _m, _b = np.polyfit(x_arr, closes_arr, 1)
         ols_predicted_price = float(_m * len(closes_arr) + _b)
 
-        # ── Step 3b: LLM pattern enhancement (if key available) ───────
-        llm_pattern: dict = {}
-        llm_pattern_error: str = ""
-        if self.llm.available:
-            try:
-                chart_png = self._render_pattern_chart(ohlc_df)
-                llm_pattern = self.llm.analyze_pattern(
-                    chart_png_bytes=chart_png,
-                    symbol=self.symbol,
-                    timeframe=self.timeframe,
-                    algo_pattern=pattern_match.name,
-                    algo_confidence=pattern_match.confidence,
-                )
-                if "error" in llm_pattern:
-                    llm_pattern_error = llm_pattern.pop("error", "")
-            except Exception as e:
-                llm_pattern = {}
-                llm_pattern_error = str(e)
-
         # ── Step 4: Risk ──────────────────────────────────────────────
         risk_assessment = self.risk_agent.analyze(
             ohlc_df, indicator_report, pattern_match, trend_report
@@ -114,15 +95,19 @@ class QuantAgent:
             ohlc_df, indicator_report, pattern_match, trend_report, risk_assessment
         )
 
-        # ── Step 5b: LLM decision enhancement ────────────────────────
-        llm_decision: dict = {}
-        llm_decision_error: str = ""
+        # ── Step 5b: Single combined LLM call (pattern + decision) ───
+        llm_combined: dict = {}
+        llm_error: str = ""
         if self.llm.available:
             try:
-                llm_decision = self.llm.synthesize_decision(
+                chart_png = self._render_pattern_chart(ohlc_df)
+                llm_combined = self.llm.analyze_and_decide(
+                    chart_png_bytes=chart_png,
                     symbol=self.symbol,
                     timeframe=self.timeframe,
                     entry=decision.entry_price,
+                    algo_pattern=pattern_match.name,
+                    algo_confidence=pattern_match.confidence,
                     indicator_overall=indicator_report.overall_signal,
                     rsi=indicator_report.rsi.value,
                     macd=indicator_report.macd.value,
@@ -137,27 +122,30 @@ class QuantAgent:
                     tp=decision.take_profit,
                     horizon_min=self.horizon_min,
                 )
-                if "error" in llm_decision:
-                    llm_decision_error = llm_decision.pop("error", "")
-                # Override algo decision with LLM if successful
-                elif "decision" in llm_decision:
-                    direction = llm_decision["decision"].upper()
+                if "error" in llm_combined:
+                    llm_error = llm_combined.pop("error", "")
+                elif "decision" in llm_combined:
+                    direction = llm_combined["decision"].upper()
                     if direction in ("LONG", "SHORT"):
                         decision.direction = direction
-                    if "justification" in llm_decision:
-                        decision.justification = llm_decision["justification"]
-                    if "risk_reward_ratio" in llm_decision:
-                        decision.risk_reward_ratio = float(llm_decision["risk_reward_ratio"])
+                    if "justification" in llm_combined:
+                        decision.justification = llm_combined["justification"]
+                    if "risk_reward_ratio" in llm_combined:
+                        decision.risk_reward_ratio = float(llm_combined["risk_reward_ratio"])
             except Exception as e:
-                llm_decision = {}
-                llm_decision_error = str(e)
+                llm_combined = {}
+                llm_error = str(e)
+
+        # Split combined result for serialization compatibility
+        llm_pattern = llm_combined  # has confirmed_pattern, structure, trend_context, symmetry
+        llm_decision = llm_combined  # has decision, justification, watch_for, predicted_close_price
 
         elapsed = time.time() - t0
 
         return self._serialize(
             decision, indicator_report, pattern_match, trend_report,
             risk_assessment, ohlc_df, elapsed, llm_pattern, llm_decision,
-            ols_predicted_price, llm_pattern_error, llm_decision_error
+            ols_predicted_price, llm_error, ""
         )
 
     # ── Serialization ─────────────────────────────────────────────────────

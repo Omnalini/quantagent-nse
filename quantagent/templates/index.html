@@ -116,6 +116,22 @@ button:disabled{opacity:.45;cursor:not-allowed}
 ::-webkit-scrollbar{width:4px}
 ::-webkit-scrollbar-track{background:var(--bg)}
 ::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+
+/* ── Data tables ─────────────────────────────────────────────────────── */
+.data-table{width:100%;border-collapse:collapse;font-size:11px;margin-top:8px}
+.data-table th{color:var(--muted);font-weight:normal;padding:4px 8px;
+               border-bottom:1px solid var(--border);text-align:left;white-space:nowrap}
+.data-table td{padding:4px 8px;border-bottom:1px solid #131b2b;white-space:nowrap}
+.data-table tr:last-child td{border:none}
+.data-table tr.correct td:first-child{border-left:2px solid var(--green)}
+.data-table tr.wrong   td:first-child{border-left:2px solid var(--red)}
+
+/* ── Equity / mini chart ─────────────────────────────────────────────── */
+#equity-wrap{position:relative;height:140px;margin-top:10px}
+
+/* ── Backtest metric grid ─────────────────────────────────────────────── */
+.bt-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:8px}
+.bt-grid2{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:8px}
 </style>
 </head>
 <body>
@@ -313,22 +329,26 @@ button:disabled{opacity:.45;cursor:not-allowed}
 
     <!-- Prediction R² comparison -->
     <div class="card">
-      <div class="card-title">Prediction R² — OLS vs LLM <span style="color:var(--muted);font-size:10px">(higher = better)</span></div>
-      <div class="agent-grid" style="grid-template-columns:1fr 1fr 1fr;margin-bottom:8px">
+      <div class="card-title">Prediction R² — OLS vs LLM <span style="color:var(--muted);font-size:10px">(higher = better · run Backtest to populate OLS)</span></div>
+      <div class="agent-grid" style="grid-template-columns:1fr 1fr 1fr 1fr;margin-bottom:8px">
         <div class="acc-cell">
           <div class="val" id="r2-ols">—</div>
           <div class="lbl">OLS R²</div>
+        </div>
+        <div class="acc-cell">
+          <div class="val" id="r2-ols-n" style="color:var(--muted)">0</div>
+          <div class="lbl">OLS Samples</div>
         </div>
         <div class="acc-cell">
           <div class="val" id="r2-llm" style="color:var(--accent)">—</div>
           <div class="lbl">LLM R²</div>
         </div>
         <div class="acc-cell">
-          <div class="val" id="r2-n">0</div>
-          <div class="lbl">Samples</div>
+          <div class="val" id="r2-llm-n" style="color:var(--muted)">0</div>
+          <div class="lbl">LLM Samples</div>
         </div>
       </div>
-      <div style="font-size:11px;color:var(--muted)" id="r2-latest"></div>
+      <div style="font-size:11px;color:var(--muted)" id="r2-interp"></div>
     </div>
 
     <!-- LLM last response (raw JSON) -->
@@ -339,8 +359,31 @@ button:disabled{opacity:.45;cursor:not-allowed}
 
     <!-- Backtest results -->
     <div id="bt-card" class="card" hidden>
-      <div class="card-title">Backtest Results</div>
-      <div id="bt-body"></div>
+      <div class="card-title">Backtest Results — <span id="bt-sym">—</span></div>
+      <div class="bt-grid" id="bt-metrics"></div>
+      <div class="bt-grid2" id="bt-metrics2"></div>
+      <div id="equity-wrap"><canvas id="equity-chart"></canvas></div>
+      <div style="font-size:10px;color:var(--muted);margin-top:4px">Equity curve (cumulative ₹ PnL per signal)</div>
+      <div style="margin-top:10px;font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--muted)">Last 10 Trades</div>
+      <table class="data-table" id="bt-trades">
+        <thead><tr>
+          <th>Time</th><th>Dir</th><th>Entry ₹</th>
+          <th>OLS Pred ₹</th><th>Actual ₹</th><th>PnL ₹</th><th>Result</th>
+        </tr></thead>
+        <tbody id="bt-trades-body"></tbody>
+      </table>
+    </div>
+
+    <!-- Live stream signal log -->
+    <div id="stream-log-card" class="card" hidden>
+      <div class="card-title">Live Stream — Signal Log</div>
+      <table class="data-table" id="stream-log-table">
+        <thead><tr>
+          <th>Time</th><th>Symbol</th><th>Signal</th>
+          <th>Entry ₹</th><th>TP ₹</th><th>SL ₹</th><th>Confidence</th>
+        </tr></thead>
+        <tbody id="stream-log-body"></tbody>
+      </table>
     </div>
 
   </main>
@@ -358,6 +401,9 @@ const S = {
   streaming: false,
   evtSource: null,
   chart: null,
+  equityChart: null,
+  // R² values: OLS comes from backtest, LLM from live analyze
+  r2: { olsVal: null, olsN: 0, llmVal: null, llmN: 0 },
 };
 
 // ── Boot ───────────────────────────────────────────────────────────────
@@ -637,25 +683,58 @@ async function refreshAccuracy() {
 }
 
 // ── R² scores ──────────────────────────────────────────────────────────
+// OLS R² comes from backtest (set via updateR2FromBacktest).
+// LLM R² comes from live /api/r2_scores (each analyze call adds one point).
+function updateR2FromBacktest(r2Ols, nSamples) {
+  S.r2.olsVal = r2Ols;
+  S.r2.olsN   = nSamples || 0;
+  renderR2Panel();
+}
+
 async function refreshR2(symbol) {
   const sym = symbol || S.symbol;
   try {
     const data = await (await fetch(`/api/r2_scores?session_id=${S.sessionId}&symbol=${sym}`)).json();
-    console.log('[QuantAgent] R² scores:', JSON.stringify(data, null, 2));
-    const fmt = v => v != null ? Number(v).toFixed(4) : '—';
-    document.getElementById('r2-ols').textContent = fmt(data.r2_ols);
-    document.getElementById('r2-llm').textContent = fmt(data.r2_llm);
-    document.getElementById('r2-n').textContent   = data.n_samples ?? 0;
-
-    // Show last prediction vs actual
-    const recent = (data.recent || []).slice(-1)[0];
-    if (recent) {
-      const olsDiff = recent.ols != null ? (recent.ols - recent.actual).toFixed(2) : 'N/A';
-      const llmDiff = recent.llm != null ? (recent.llm - recent.actual).toFixed(2) : 'N/A';
-      document.getElementById('r2-latest').textContent =
-        `Last: actual ₹${Number(recent.actual).toFixed(2)} · OLS err ${olsDiff} · LLM err ${llmDiff}`;
+    S.r2.llmVal = data.r2_llm;
+    S.r2.llmN   = data.n_llm ?? 0;
+    // Also update OLS from live tracker if we have enough samples and no backtest yet
+    if (!S.r2.olsVal && data.r2_ols != null) {
+      S.r2.olsVal = data.r2_ols;
+      S.r2.olsN   = data.n_ols ?? 0;
     }
+    renderR2Panel(data.recent);
   } catch (_) {}
+}
+
+function renderR2Panel(recent) {
+  const fmt = v => v != null ? Number(v).toFixed(4) : '—';
+  document.getElementById('r2-ols').textContent   = fmt(S.r2.olsVal);
+  document.getElementById('r2-ols-n').textContent = S.r2.olsN;
+  document.getElementById('r2-llm').textContent   = fmt(S.r2.llmVal);
+  document.getElementById('r2-llm-n').textContent = S.r2.llmN;
+
+  // Interpretation
+  const interp = document.getElementById('r2-interp');
+  if (S.r2.olsVal != null && S.r2.llmVal != null) {
+    const diff = (S.r2.llmVal - S.r2.olsVal).toFixed(4);
+    const better = S.r2.llmVal > S.r2.olsVal ? 'LLM outperforms OLS' : 'OLS outperforms LLM';
+    interp.textContent = `${better} by ${Math.abs(diff)} R² points — LLM explained ${(S.r2.llmVal*100).toFixed(1)}% of price variance vs ${(S.r2.olsVal*100).toFixed(1)}% for straight-line regression.`;
+    interp.style.color = S.r2.llmVal > S.r2.olsVal ? 'var(--green)' : 'var(--yellow)';
+  } else if (S.r2.olsVal != null) {
+    interp.textContent = `OLS R² from backtest: ${fmt(S.r2.olsVal)} (${S.r2.olsN} samples). Run Analyse Now a few times to get LLM R².`;
+    interp.style.color = 'var(--muted)';
+  } else if (recent) {
+    const r = (recent || []).slice(-1)[0];
+    if (r) {
+      const olsDiff = r.ols != null ? (r.ols - r.actual).toFixed(2) : 'N/A';
+      const llmDiff = r.llm != null ? (r.llm - r.actual).toFixed(2) : 'N/A';
+      interp.textContent = `Last: actual ₹${Number(r.actual).toFixed(2)} · OLS err ₹${olsDiff} · LLM err ₹${llmDiff}`;
+      interp.style.color = 'var(--muted)';
+    }
+  } else {
+    interp.textContent = 'Run Quick Backtest to populate OLS R². Run Analyse Now to populate LLM R².';
+    interp.style.color = 'var(--muted)';
+  }
 }
 
 // ── Streaming ──────────────────────────────────────────────────────────
@@ -672,12 +751,17 @@ function startStream() {
       document.getElementById('price-big').textContent = '₹' + Number(ev.price).toLocaleString('en-IN',{maximumFractionDigits:2});
       document.getElementById('price-time').textContent = new Date().toLocaleTimeString('en-IN');
     }
-    if (ev.type === 'analysis' && ev.analysis) { renderResult(ev.analysis); refreshAccuracy(); }
+    if (ev.type === 'analysis' && ev.analysis) {
+      renderResult(ev.analysis);
+      refreshAccuracy();
+      logStreamSignal(ev.analysis);
+    }
     if (ev.type === 'error') setStatus('Stream error: ' + ev.message);
   };
   S.streaming = true;
   document.getElementById('stream-btn').textContent = '⏹ Stop Stream';
-  setStatus('Streaming live ticks from NSE…');
+  document.getElementById('stream-log-card').hidden = false;
+  setStatus('Streaming live ticks from NSE… (auto-analysis every 10 ticks)');
 }
 
 function stopStream() {
@@ -687,28 +771,114 @@ function stopStream() {
   setStatus('Stream stopped.');
 }
 
+function logStreamSignal(analysis) {
+  const dec  = analysis.decision;
+  const body = document.getElementById('stream-log-body');
+  const time = new Date().toLocaleTimeString('en-IN', {hour:'2-digit', minute:'2-digit'});
+  const dir  = dec.direction;
+  const cls  = dir === 'LONG' ? 'bull' : 'bear';
+  const fmt  = v => v != null ? '₹' + Number(v).toLocaleString('en-IN', {maximumFractionDigits:2}) : '—';
+  const row  = document.createElement('tr');
+  row.innerHTML = `
+    <td>${time}</td>
+    <td>${analysis.symbol || S.symbol}</td>
+    <td><span class="${cls}">${dir}</span></td>
+    <td>${fmt(dec.entry_price)}</td>
+    <td class="bull">${fmt(dec.take_profit)}</td>
+    <td class="bear">${fmt(dec.stop_loss)}</td>
+    <td>${(dec.confidence * 100).toFixed(0)}%</td>`;
+  body.prepend(row);  // newest on top
+}
+
 // ── Backtest ───────────────────────────────────────────────────────────
 async function runBacktest() {
   S.symbol   = document.getElementById('symbol-sel').value;
   S.interval = document.getElementById('tf-sel').value;
-  setStatus('Running backtest on 1-month history…');
-  const res  = await fetch('/api/backtest', {
-    method: 'POST', headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({ symbol: S.symbol, interval: S.interval, period: '1mo' }),
+  const btn  = document.querySelector('button.secondary[onclick="runBacktest()"]');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Running…'; }
+  setStatus('Running backtest on 5-day history (rule-based, no LLM)…');
+
+  try {
+    const res  = await fetch('/api/backtest', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ symbol: S.symbol, interval: S.interval, period: '5d', analysis_every: 3 }),
+    });
+    const d = await res.json();
+    if (d.error) { setStatus('Backtest error: ' + d.error); return; }
+
+    // Update R² panel with OLS backtest results
+    updateR2FromBacktest(d.r2_ols, d.n_ols_samples);
+
+    // Show backtest card
+    const card = document.getElementById('bt-card');
+    card.hidden = false;
+    document.getElementById('bt-sym').textContent = `${d.symbol} · ${d.interval} · ${d.n_signals} signals`;
+
+    // Row 1: win metrics
+    document.getElementById('bt-metrics').innerHTML = `
+      <div class="acc-cell"><div class="val bull">${d.win_rate.toFixed(1)}%</div><div class="lbl">Win Rate</div></div>
+      <div class="acc-cell"><div class="val">${d.n_signals}</div><div class="lbl">Signals</div></div>
+      <div class="acc-cell"><div class="val bull">${d.long_accuracy.toFixed(1)}%</div><div class="lbl">Long Acc.</div></div>
+      <div class="acc-cell"><div class="val bear">${d.short_accuracy.toFixed(1)}%</div><div class="lbl">Short Acc.</div></div>`;
+
+    // Row 2: PnL metrics
+    const pf = d.profit_factor != null ? d.profit_factor.toFixed(2) : '—';
+    document.getElementById('bt-metrics2').innerHTML = `
+      <div class="acc-cell"><div class="val bull">₹${d.avg_profit.toFixed(2)}</div><div class="lbl">Avg Profit</div></div>
+      <div class="acc-cell"><div class="val bear">₹${d.avg_loss.toFixed(2)}</div><div class="lbl">Avg Loss</div></div>
+      <div class="acc-cell"><div class="val">${pf}</div><div class="lbl">Profit Factor</div></div>`;
+
+    // Equity curve chart
+    buildEquityChart(d.equity_curve);
+
+    // Sample trades table
+    const tbody = document.getElementById('bt-trades-body');
+    tbody.innerHTML = (d.sample_trades || []).map(t => {
+      const cls   = t.correct === true ? 'correct' : t.correct === false ? 'wrong' : '';
+      const dircls = t.direction === 'LONG' ? 'bull' : 'bear';
+      const pnl   = t.pnl != null ? (t.pnl >= 0 ? `<span class="bull">+${t.pnl.toFixed(2)}</span>` : `<span class="bear">${t.pnl.toFixed(2)}</span>`) : '—';
+      const res   = t.correct === true ? '<span class="bull">✓</span>' : t.correct === false ? '<span class="bear">✗</span>' : '—';
+      const dt    = t.datetime ? t.datetime.slice(0, 16).replace('T', ' ') : '—';
+      return `<tr class="${cls}">
+        <td>${dt}</td>
+        <td><span class="${dircls}">${t.direction}</span></td>
+        <td>₹${t.entry.toFixed(2)}</td>
+        <td>${t.ols_pred != null ? '₹'+t.ols_pred.toFixed(2) : '—'}</td>
+        <td>${t.actual_next != null ? '₹'+t.actual_next.toFixed(2) : '—'}</td>
+        <td>${pnl}</td><td>${res}</td></tr>`;
+    }).join('');
+
+    setStatus(`Backtest done — ${d.n_signals} signals · Win rate ${d.win_rate.toFixed(1)}% · OLS R² ${d.r2_ols != null ? d.r2_ols.toFixed(4) : 'N/A'}`);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '⏪ Quick Backtest'; }
+  }
+}
+
+function buildEquityChart(equityCurve) {
+  if (!equityCurve || !equityCurve.length) return;
+  const ctx = document.getElementById('equity-chart').getContext('2d');
+  if (S.equityChart) { S.equityChart.destroy(); }
+  const pos = equityCurve[equityCurve.length - 1] >= 0;
+  S.equityChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: equityCurve.map((_, i) => i + 1),
+      datasets: [{
+        label: 'Cumulative PnL ₹', data: equityCurve,
+        borderColor: pos ? '#22c55e' : '#ef4444', borderWidth: 1.5,
+        pointRadius: 0, tension: 0.3,
+        fill: { target: 'origin', above: 'rgba(34,197,94,0.08)', below: 'rgba(239,68,68,0.08)' },
+      }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { display: false },
+        y: { ticks: { color:'#555', font:{size:10} }, grid:{color:'#1f2937'} },
+      },
+    },
   });
-  const data = await res.json();
-  if (data.error) { setStatus('Backtest error: ' + data.error); return; }
-  const s = data.backtest_summary;
-  const card = document.getElementById('bt-card');
-  card.hidden = false;
-  document.getElementById('bt-body').innerHTML = `
-    <div class="acc-grid" style="grid-template-columns:repeat(4,1fr)">
-      <div class="acc-cell"><div class="val">${data.total_bars}</div><div class="lbl">Bars</div></div>
-      <div class="acc-cell"><div class="val">${data.predictions_made.length}</div><div class="lbl">Signals</div></div>
-      <div class="acc-cell"><div class="val bull">${(s.accuracy_pct||0).toFixed(1)}%</div><div class="lbl">Accuracy</div></div>
-      <div class="acc-cell"><div class="val">${(s.avg_rcc||0).toFixed(4)}</div><div class="lbl">Avg&nbsp;Rcc</div></div>
-    </div>`;
-  setStatus(`Backtest done — ${data.predictions_made.length} signals over ${data.total_bars} bars.`);
 }
 
 // ── Status ─────────────────────────────────────────────────────────────

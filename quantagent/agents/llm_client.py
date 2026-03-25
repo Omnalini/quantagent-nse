@@ -31,23 +31,11 @@ except ImportError:
 
 # ── Prompt templates (shared between providers) ───────────────────────────
 
-PATTERN_PROMPT = """You are a chart-pattern expert for Indian equity markets (NSE/Nifty 50).
-A {timeframe} candlestick chart of {symbol} is attached.
-
-Algorithmic pre-scan detected: {algo_pattern} (confidence {confidence:.0%}).
-
-Examine the chart and reply in JSON only (no markdown fence):
-{{
-  "confirmed_pattern": "<pattern name or None>",
-  "direction": "<Bullish|Bearish|Neutral>",
-  "structure": "<one sentence on highs/lows/shape>",
-  "trend_context": "<one sentence on surrounding trend>",
-  "symmetry": "<one sentence on shape symmetry>",
-  "confidence": <0.0-1.0>
-}}"""
-
-DECISION_PROMPT = """You are an HFT analyst for NSE Indian equities.
+COMBINED_PROMPT = """You are an expert HFT analyst and chart-pattern specialist for NSE Indian equities.
 Asset: {symbol} | Timeframe: {timeframe} | Entry: ₹{entry:.2f}
+
+A {timeframe} candlestick chart is attached.
+Algorithmic pre-scan detected: {algo_pattern} (confidence {confidence:.0%}).
 
 Agent signals:
 - Indicators : {indicator_overall} (RSI {rsi:.1f}, MACD {macd:.4f})
@@ -60,11 +48,17 @@ Also predict the numeric close price for the NEXT single {timeframe} bar.
 
 Reply in JSON only (no markdown fence):
 {{
+  "confirmed_pattern": "<pattern name or None>",
+  "direction": "<Bullish|Bearish|Neutral>",
+  "structure": "<one sentence on highs/lows/shape>",
+  "trend_context": "<one sentence on surrounding trend>",
+  "symmetry": "<one sentence on shape symmetry>",
+  "pattern_confidence": <0.0-1.0>,
   "decision": "<LONG|SHORT>",
   "justification": "<2-3 sentences citing strongest signals>",
   "risk_reward_ratio": <1.2-1.8>,
   "watch_for": "<one invalidation signal>",
-  "predicted_close_price": <your best numeric estimate of next {timeframe} bar close price as float>
+  "predicted_close_price": <numeric float estimate of next {timeframe} bar close>
 }}"""
 
 
@@ -84,8 +78,7 @@ class LLMClient:
     Usage:
         client = LLMClient(api_key="AIza...")        # Gemini
         client = LLMClient(api_key="sk-ant-...")     # Claude
-        result = client.analyze_pattern(png_bytes, ...)
-        result = client.synthesize_decision(...)
+        result = client.analyze_and_decide(png_bytes, ...)
     """
 
     def __init__(self, api_key: Optional[str] = None):
@@ -111,35 +104,21 @@ class LLMClient:
 
     # ── Public API ────────────────────────────────────────────────────────
 
-    def analyze_pattern(
+    def analyze_and_decide(
         self,
         chart_png_bytes: bytes,
-        symbol: str,
-        timeframe: str,
-        algo_pattern: str,
-        algo_confidence: float,
-    ) -> dict:
-        prompt = PATTERN_PROMPT.format(
-            timeframe=timeframe, symbol=symbol,
-            algo_pattern=algo_pattern, confidence=algo_confidence,
-        )
-        if self._ant:
-            return self._ant_vision(chart_png_bytes, prompt)
-        if self._gem:
-            return self._gem_vision(chart_png_bytes, prompt)
-        return {}
-
-    def synthesize_decision(
-        self,
         symbol: str, timeframe: str, entry: float,
+        algo_pattern: str, algo_confidence: float,
         indicator_overall: str, rsi: float, macd: float,
         pattern_name: str, pattern_dir: str, pattern_conf: float,
         trend: str, kappa: float, breakout_prob: float,
         rr_ratio: float, sl: float, tp: float,
         horizon_min: int = 45,
     ) -> dict:
-        prompt = DECISION_PROMPT.format(
+        """Single combined call: pattern recognition + trade decision (saves 1 API request)."""
+        prompt = COMBINED_PROMPT.format(
             symbol=symbol, timeframe=timeframe, entry=entry,
+            algo_pattern=algo_pattern, confidence=algo_confidence,
             indicator_overall=indicator_overall, rsi=rsi, macd=macd,
             pattern_name=pattern_name, pattern_dir=pattern_dir,
             pattern_conf=pattern_conf, trend=trend, kappa=kappa,
@@ -147,9 +126,9 @@ class LLMClient:
             horizon_min=horizon_min,
         )
         if self._ant:
-            return self._ant_text(prompt)
+            return self._ant_vision(chart_png_bytes, prompt)
         if self._gem:
-            return self._gem_text(prompt)
+            return self._gem_vision(chart_png_bytes, prompt)
         return {}
 
     def _safe_gem_text(self, resp) -> str:
@@ -224,7 +203,7 @@ class LLMClient:
         try:
             resp = self._ant.messages.create(
                 model="claude-haiku-4-5-20251001",
-                max_tokens=512,
+                max_tokens=1024,
                 messages=[{"role": "user", "content": [
                     {"type": "image",
                      "source": {"type": "base64", "media_type": "image/png", "data": b64}},
@@ -255,7 +234,7 @@ class LLMClient:
                 model="gemini-2.5-flash",
                 contents=[img_part, prompt],
                 config=_gtypes.GenerateContentConfig(
-                    max_output_tokens=512,
+                    max_output_tokens=1024,
                     temperature=0.2,
                 ),
             )

@@ -24,7 +24,7 @@ from agents import QuantAgent
 from data.nifty_fetcher import (
     fetch_ohlc_cached, get_nifty_50_list, is_market_open, NIFTY_50
 )
-from data.simulator import MarketSimulator, AccuracyTracker
+from data.simulator import AccuracyTracker
 from charts import generate_all_charts
 
 app = Flask(__name__)
@@ -45,6 +45,17 @@ DEFAULT_PERIOD    = "5d"
 
 # ── Helpers ───────────────────────────────────────────────────────────────
 
+def _r2(actuals, preds):
+    """Compute R² score. Returns None if fewer than 2 samples."""
+    if len(actuals) < 2:
+        return None
+    actuals = np.array(actuals, dtype=float)
+    preds   = np.array(preds,   dtype=float)
+    ss_res  = np.sum((actuals - preds) ** 2)
+    ss_tot  = np.sum((actuals - np.mean(actuals)) ** 2)
+    return round(float(1 - ss_res / ss_tot) if ss_tot != 0 else 0.0, 4)
+
+
 def _get_api_key(request_data: dict) -> str | None:
     """Read API key: request body → header → session → .env fallback."""
     return (request_data.get("api_key")
@@ -54,17 +65,11 @@ def _get_api_key(request_data: dict) -> str | None:
 
 
 def _fetch_df(symbol: str, interval: str, period: str) -> pd.DataFrame:
-    """Fetch real NSE data; fall back to simulator on any error."""
-    try:
-        df = fetch_ohlc_cached(symbol, interval, period)
-        if len(df) >= 30:
-            return df
-    except Exception:
-        pass
-    # Fallback: synthetic data if yfinance fails
-    sim = MarketSimulator(asset="NQ")
-    sim.generate_history(200)
-    return sim.get_dataframe()
+    """Fetch real NSE data; raises on failure (no synthetic fallback)."""
+    df = fetch_ohlc_cached(symbol, interval, period)
+    if len(df) < 30:
+        raise ValueError(f"Only {len(df)} bars returned for {symbol} — need ≥30")
+    return df
 
 
 # ── Routes ────────────────────────────────────────────────────────────────
@@ -138,15 +143,6 @@ def r2_scores():
     r2_key     = f"{session_id}:{symbol}"
     history    = price_trackers.get(r2_key, {}).get("history", [])
 
-    def _r2(actuals, preds):
-        if len(actuals) < 2:
-            return None
-        actuals = np.array(actuals, dtype=float)
-        preds = np.array(preds, dtype=float)
-        ss_res = np.sum((actuals - preds) ** 2)
-        ss_tot = np.sum((actuals - np.mean(actuals)) ** 2)
-        return round(float(1 - ss_res / ss_tot) if ss_tot != 0 else 0.0, 4)
-
     ols_pairs = [(h["actual"], h["ols"]) for h in history if h.get("ols") is not None]
     llm_pairs = [(h["actual"], h["llm"]) for h in history if h.get("llm") is not None]
 
@@ -179,9 +175,10 @@ def analyze():
     session_id = data.get("session_id", str(uuid.uuid4()))
     api_key    = _get_api_key(data)
 
-    df = _fetch_df(symbol, interval, period)
-    if len(df) < 30:
-        return jsonify({"error": "Not enough data bars (need ≥30)"}), 400
+    try:
+        df = _fetch_df(symbol, interval, period)
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 400
 
     # Compute horizon minutes: 3 candles × bar_minutes
     bar_min_map = {"1m": 1, "5m": 5, "15m": 15, "30m": 30, "1h": 60, "4h": 240}
@@ -329,14 +326,15 @@ def stream():
 @app.route('/api/backtest', methods=['POST'])
 def backtest():
     """
-    Quick backtest on cached historical 15m data (rule-based, no LLM).
+    Quick backtest on 5d of 15m data (rule-based, no LLM to save quota).
+    Computes OLS R², equity curve, per-trade win/loss, profit factor.
     POST: { symbol, interval, period, analysis_every }
     """
-    data          = request.json or {}
-    symbol        = data.get("symbol", DEFAULT_SYMBOL).upper()
-    interval      = data.get("interval", DEFAULT_INTERVAL)
-    period        = data.get("period", "1mo")
-    analysis_every = int(data.get("analysis_every", 10))
+    data           = request.json or {}
+    symbol         = data.get("symbol", DEFAULT_SYMBOL).upper()
+    interval       = data.get("interval", DEFAULT_INTERVAL)
+    period         = data.get("period", "5d")
+    analysis_every = int(data.get("analysis_every", 3))
 
     try:
         df = fetch_ohlc_cached(symbol, interval, period)
@@ -344,23 +342,40 @@ def backtest():
         return jsonify({"error": str(exc)}), 500
 
     if len(df) < 50:
-        return jsonify({"error": "Not enough bars for backtest"}), 400
+        return jsonify({"error": "Not enough bars for backtest (need ≥50)"}), 400
 
-    tracker = AccuracyTracker()
-    agent   = QuantAgent(timeframe=interval)
-    results = []
+    tracker     = AccuracyTracker()
+    agent       = QuantAgent(timeframe=interval)
+    results     = []
+    ols_actuals = []
+    ols_preds   = []
 
     for i in range(50, len(df), analysis_every):
-        window = df.iloc[:i]
+        window   = df.iloc[:i]
         analysis = agent.run(window)
         if "decision" not in analysis:
             continue
 
+        # OLS price prediction for this window
+        closes_w = window['close'].values[-20:].astype(float)
+        x_w      = np.arange(len(closes_w), dtype=float)
+        m_w, b_w = np.polyfit(x_w, closes_w, 1)
+        ols_pred  = round(float(m_w * len(closes_w) + b_w), 2)
+
+        # Actual next-bar close (bar immediately after the window)
+        actual_next = round(float(df.iloc[i]['close']), 2) if i < len(df) else None
+        if actual_next is not None:
+            ols_actuals.append(actual_next)
+            ols_preds.append(ols_pred)
+
+        # AccuracyTracker: record + validate with next 3 bars
         pred_id = f"bt_{i}"
+        entry   = analysis["decision"]["entry_price"]
+        direction = analysis["decision"]["direction"]
         tracker.record_prediction(
             prediction_id=pred_id,
-            direction=analysis["decision"]["direction"],
-            entry_price=analysis["decision"]["entry_price"],
+            direction=direction,
+            entry_price=entry,
             stop_loss=analysis["decision"]["stop_loss"],
             take_profit=analysis["decision"]["take_profit"],
             timestamp=time.time()
@@ -369,22 +384,68 @@ def backtest():
             if i + j - 1 < len(df):
                 tracker.add_validation_bar(pred_id, df.iloc[i + j - 1].to_dict())
 
+        # Simple directional correctness vs actual next close
+        correct = None
+        pnl     = None
+        if actual_next is not None:
+            correct = ((direction == "LONG"  and actual_next > entry) or
+                       (direction == "SHORT" and actual_next < entry))
+            pnl = round((actual_next - entry) if direction == "LONG"
+                        else (entry - actual_next), 4)
+
+        dt_val = df.iloc[i - 1].get("datetime", "")
         results.append({
-            "bar_idx":   i,
-            "datetime":  str(df.iloc[i - 1].get("datetime", "")),
-            "direction": analysis["decision"]["direction"],
-            "confidence": analysis["decision"]["confidence"],
-            "pattern":   analysis["pattern"]["name"],
-            "trend":     analysis["trend"]["classification"],
-            "price":     analysis["decision"]["entry_price"],
+            "datetime":   str(dt_val) if dt_val else "",
+            "direction":  direction,
+            "entry":      round(entry, 2),
+            "ols_pred":   ols_pred,
+            "actual_next": actual_next,
+            "correct":    correct,
+            "pnl":        pnl,
+            "pattern":    analysis["pattern"]["name"],
+            "confidence": round(analysis["decision"]["confidence"], 3),
         })
 
+    # ── Summary metrics ───────────────────────────────────────────────────
+    with_result   = [r for r in results if r["correct"] is not None]
+    correct_count = sum(1 for r in with_result if r["correct"])
+    win_rate      = round(correct_count / len(with_result) * 100, 1) if with_result else 0.0
+
+    long_t  = [r for r in with_result if r["direction"] == "LONG"]
+    short_t = [r for r in with_result if r["direction"] == "SHORT"]
+    long_acc  = round(sum(1 for r in long_t  if r["correct"]) / len(long_t)  * 100, 1) if long_t  else 0.0
+    short_acc = round(sum(1 for r in short_t if r["correct"]) / len(short_t) * 100, 1) if short_t else 0.0
+
+    win_pnls  = [r["pnl"] for r in with_result if r["correct"]     and r["pnl"] is not None]
+    loss_pnls = [abs(r["pnl"]) for r in with_result if not r["correct"] and r["pnl"] is not None]
+    avg_profit    = round(float(np.mean(win_pnls)),  4) if win_pnls  else 0.0
+    avg_loss      = round(float(np.mean(loss_pnls)), 4) if loss_pnls else 0.0
+    profit_factor = round(sum(win_pnls) / sum(loss_pnls), 2) if loss_pnls and sum(loss_pnls) > 0 else None
+
+    # Equity curve (cumulative PnL across all windows)
+    cum = 0.0
+    equity_curve = []
+    for r in results:
+        if r["pnl"] is not None:
+            cum += r["pnl"]
+        equity_curve.append(round(cum, 4))
+
     return jsonify({
-        "symbol":             symbol,
-        "interval":           interval,
-        "backtest_summary":   tracker.get_summary(),
-        "predictions_made":   results,
-        "total_bars":         len(df),
+        "symbol":          symbol,
+        "interval":        interval,
+        "total_bars":      len(df),
+        "n_signals":       len(results),
+        "win_rate":        win_rate,
+        "long_accuracy":   long_acc,
+        "short_accuracy":  short_acc,
+        "avg_profit":      avg_profit,
+        "avg_loss":        avg_loss,
+        "profit_factor":   profit_factor,
+        "r2_ols":          _r2(ols_actuals, ols_preds),
+        "n_ols_samples":   len(ols_actuals),
+        "equity_curve":    equity_curve,
+        "sample_trades":   results[-10:],
+        "backtest_summary": tracker.get_summary(),
     })
 
 

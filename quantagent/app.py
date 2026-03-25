@@ -35,6 +35,8 @@ app.config['JSON_SORT_KEYS'] = False
 # ── Global session state ──────────────────────────────────────────────────
 trackers: dict = {}
 session_meta: dict = {}
+# R² price prediction tracking: session_id -> {"history": [...], "pending": {...}}
+price_trackers: dict = {}
 
 DEFAULT_SYMBOL    = "RELIANCE"
 DEFAULT_INTERVAL  = "15m"
@@ -128,6 +130,34 @@ def llm_status():
     })
 
 
+@app.route('/api/r2_scores', methods=['GET'])
+def r2_scores():
+    """Return R² scores comparing OLS vs LLM price predictions to actuals."""
+    session_id = request.args.get("session_id", "default")
+    history = price_trackers.get(session_id, {}).get("history", [])
+
+    def _r2(actuals, preds):
+        if len(actuals) < 2:
+            return None
+        actuals = np.array(actuals, dtype=float)
+        preds = np.array(preds, dtype=float)
+        ss_res = np.sum((actuals - preds) ** 2)
+        ss_tot = np.sum((actuals - np.mean(actuals)) ** 2)
+        return round(float(1 - ss_res / ss_tot) if ss_tot != 0 else 0.0, 4)
+
+    ols_pairs = [(h["actual"], h["ols"]) for h in history if h.get("ols") is not None]
+    llm_pairs = [(h["actual"], h["llm"]) for h in history if h.get("llm") is not None]
+
+    return jsonify({
+        "n_samples":   len(history),
+        "r2_ols":      _r2([p[0] for p in ols_pairs], [p[1] for p in ols_pairs]),
+        "r2_llm":      _r2([p[0] for p in llm_pairs], [p[1] for p in llm_pairs]),
+        "n_ols":       len(ols_pairs),
+        "n_llm":       len(llm_pairs),
+        "recent":      history[-5:],
+    })
+
+
 @app.route('/api/analyze', methods=['POST'])
 def analyze():
     """
@@ -162,6 +192,18 @@ def analyze():
 
     if "error" in result:
         return jsonify(result), 400
+
+    # R² price-prediction tracking
+    curr_price = float(df['close'].iloc[-1])
+    pt = price_trackers.setdefault(session_id, {"history": [], "pending": None})
+    if pt["pending"]:
+        pt["pending"]["actual"] = curr_price
+        pt["history"].append(pt["pending"])
+    preds = result.get("predictions", {})
+    pt["pending"] = {
+        "ols": preds.get("ols_predicted_price"),
+        "llm": preds.get("llm_predicted_price"),
+    }
 
     # Accuracy tracking
     if session_id not in trackers:
@@ -304,7 +346,6 @@ def backtest():
             continue
 
         pred_id = f"bt_{i}"
-        future_bar = df.iloc[i] if i < len(df) else None
         tracker.record_prediction(
             prediction_id=pred_id,
             direction=analysis["decision"]["direction"],
@@ -313,8 +354,9 @@ def backtest():
             take_profit=analysis["decision"]["take_profit"],
             timestamp=time.time()
         )
-        if future_bar is not None:
-            tracker.add_validation_bar(pred_id, future_bar.to_dict())
+        for j in range(1, 4):
+            if i + j - 1 < len(df):
+                tracker.add_validation_bar(pred_id, df.iloc[i + j - 1].to_dict())
 
         results.append({
             "bar_idx":   i,

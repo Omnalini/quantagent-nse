@@ -297,8 +297,10 @@ class AccuracyTracker:
 
         return {
             "total_predictions": len(self.predictions),
+            "total": len(self.predictions),          # frontend alias
             "validated": total,
             "accuracy": round(accuracy * 100, 1),
+            "accuracy_pct": round(accuracy * 100, 1),  # frontend alias
             "avg_accuracy_score": round(np.mean([r["accuracy_score"] for r in validated]) * 100, 1),
             "avg_rcc": round(np.mean([r["rcc"] for r in validated]), 4),
             "avg_rmax": round(np.mean([r["rmax"] for r in validated]), 4),

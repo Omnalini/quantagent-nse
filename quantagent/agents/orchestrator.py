@@ -79,6 +79,12 @@ class QuantAgent:
         # ── Step 3: Trend ─────────────────────────────────────────────
         trend_report = self.trend_agent.analyze(ohlc_df)
 
+        # ── Step 3a: OLS price prediction for next bar ─────────────────
+        closes_arr = ohlc_df['close'].values[-20:].astype(float)
+        x_arr = np.arange(len(closes_arr), dtype=float)
+        _m, _b = np.polyfit(x_arr, closes_arr, 1)
+        ols_predicted_price = float(_m * len(closes_arr) + _b)
+
         # ── Step 3b: LLM pattern enhancement (if key available) ───────
         llm_pattern: dict = {}
         if self.llm.available:
@@ -142,13 +148,15 @@ class QuantAgent:
 
         return self._serialize(
             decision, indicator_report, pattern_match, trend_report,
-            risk_assessment, ohlc_df, elapsed, llm_pattern, llm_decision
+            risk_assessment, ohlc_df, elapsed, llm_pattern, llm_decision,
+            ols_predicted_price
         )
 
     # ── Serialization ─────────────────────────────────────────────────────
 
     def _serialize(self, decision: TradeDecision, ind, pat, tre, risk,
-                   ohlc_df, elapsed, llm_pattern, llm_decision) -> Dict:
+                   ohlc_df, elapsed, llm_pattern, llm_decision,
+                   ols_predicted_price: float = 0.0) -> Dict:
 
         closes = ohlc_df['close'].values.astype(float)
         highs  = ohlc_df['high'].values.astype(float)
@@ -166,12 +174,23 @@ class QuantAgent:
         else:
             timestamps = list(range(min(100, len(closes))))
 
+        llm_predicted_price = llm_decision.get("predicted_close_price")
+        try:
+            llm_predicted_price = float(llm_predicted_price) if llm_predicted_price else None
+        except (TypeError, ValueError):
+            llm_predicted_price = None
+
         return {
             "timestamp":   time.time(),
             "timeframe":   self.timeframe,
             "symbol":      self.symbol,
             "elapsed_ms":  round(elapsed * 1000, 1),
             "llm_enabled": self.llm.available,
+            "predictions": {
+                "current_price":      round(float(closes[-1]), 2),
+                "ols_predicted_price": round(ols_predicted_price, 2),
+                "llm_predicted_price": round(llm_predicted_price, 2) if llm_predicted_price else None,
+            },
 
             "decision": {
                 "direction":        decision.direction,

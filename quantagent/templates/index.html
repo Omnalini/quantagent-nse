@@ -157,13 +157,10 @@ button:disabled{opacity:.45;cursor:not-allowed}
       </div>
     </div>
 
-    <!-- API Key input -->
+    <!-- LLM status (key loaded from .env server-side) -->
     <div class="card">
-      <div class="card-title">LLM API Key <span style="color:var(--muted)">(optional)</span></div>
-      <label>Claude (sk-ant-...) or Gemini (AIza...)</label>
-      <input type="password" id="api-key-in" placeholder="sk-ant-... or AIza..."/>
-      <button class="secondary" style="margin-top:8px" onclick="saveKey()">Save Key</button>
-      <div id="key-msg" style="font-size:10px;color:var(--muted);margin-top:6px"></div>
+      <div class="card-title">LLM Status</div>
+      <div id="llm-detail" style="font-size:11px;color:var(--muted)">Checking…</div>
     </div>
 
     <!-- Price widget -->
@@ -314,6 +311,32 @@ button:disabled{opacity:.45;cursor:not-allowed}
 
     </div><!-- /agent-grid -->
 
+    <!-- Prediction R² comparison -->
+    <div class="card">
+      <div class="card-title">Prediction R² — OLS vs LLM <span style="color:var(--muted);font-size:10px">(higher = better)</span></div>
+      <div class="agent-grid" style="grid-template-columns:1fr 1fr 1fr;margin-bottom:8px">
+        <div class="acc-cell">
+          <div class="val" id="r2-ols">—</div>
+          <div class="lbl">OLS R²</div>
+        </div>
+        <div class="acc-cell">
+          <div class="val" id="r2-llm" style="color:var(--accent)">—</div>
+          <div class="lbl">LLM R²</div>
+        </div>
+        <div class="acc-cell">
+          <div class="val" id="r2-n">0</div>
+          <div class="lbl">Samples</div>
+        </div>
+      </div>
+      <div style="font-size:11px;color:var(--muted)" id="r2-latest"></div>
+    </div>
+
+    <!-- LLM last response (raw JSON) -->
+    <div class="card" id="llm-response-card" hidden>
+      <div class="card-title">LLM Raw Response <span id="llm-resp-provider" style="color:var(--accent)"></span></div>
+      <pre id="llm-resp-json" style="font-size:10px;color:var(--text);white-space:pre-wrap;word-break:break-all;max-height:180px;overflow-y:auto;background:#0d1117;border-radius:4px;padding:8px"></pre>
+    </div>
+
     <!-- Backtest results -->
     <div id="bt-card" class="card" hidden>
       <div class="card-title">Backtest Results</div>
@@ -351,22 +374,29 @@ const S = {
 // ── LLM status check ───────────────────────────────────────────────────
 async function checkLLMStatus() {
   const badge = document.getElementById('llm-status');
+  const detail = document.getElementById('llm-detail');
   badge.textContent = 'LLM: checking…';
   try {
     const data = await (await fetch('/api/llm_status')).json();
     console.log('[QuantAgent] LLM status:', JSON.stringify(data, null, 2));
     if (data.llm_available) {
-      const label = data.provider === 'gemini' ? 'Gemini' : 'Claude';
+      const label = data.provider === 'gemini' ? 'Gemini 2.5-flash' : 'Claude';
       badge.textContent = `LLM: ${label} ✓`;
       badge.classList.remove('llm-off');
+      detail.textContent = `Connected · ${label} · reply: "${data.reply}"`;
+      detail.style.color = 'var(--green)';
     } else {
       badge.textContent = 'LLM: ' + (data.status === 'no_key' ? 'No Key' : 'Error');
       badge.classList.add('llm-off');
+      detail.textContent = data.error || data.status;
+      detail.style.color = 'var(--red)';
       console.warn('[QuantAgent] LLM unavailable:', data.error || data.status);
     }
   } catch (e) {
     badge.textContent = 'LLM: Error';
     badge.classList.add('llm-off');
+    detail.textContent = e.message;
+    detail.style.color = 'var(--red)';
     console.error('[QuantAgent] LLM status check failed:', e.message);
   }
 }
@@ -410,30 +440,6 @@ async function checkMarket() {
     el.classList.toggle('closed', !is_open);
   } catch (_) {}
   setTimeout(checkMarket, 60_000);
-}
-
-// ── API key ────────────────────────────────────────────────────────────
-async function saveKey() {
-  const key = document.getElementById('api-key-in').value.trim();
-  if (!key) { document.getElementById('key-msg').textContent = 'Enter your key first.'; return; }
-  const res  = await fetch('/api/set_api_key', {
-    method: 'POST', headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({ api_key: key }),
-  });
-  const data = await res.json();
-  const msg  = document.getElementById('key-msg');
-  if (data.llm_enabled) {
-    const label = data.provider === 'gemini' ? 'Gemini' : 'Claude';
-    msg.textContent = `✓ ${label} key saved — LLM enabled.`;
-    msg.style.color = 'var(--green)';
-    const badge = document.getElementById('llm-status');
-    badge.textContent = `LLM: ${label}`;
-    badge.classList.remove('llm-off');
-    document.getElementById('api-key-in').value = '';
-  } else {
-    msg.textContent = 'Error: ' + (data.error || 'Unknown');
-    msg.style.color = 'var(--red)';
-  }
 }
 
 // ── Chart ──────────────────────────────────────────────────────────────
@@ -491,7 +497,8 @@ async function runAnalysis() {
     if (data.error) { setStatus('Error: ' + data.error); return; }
     renderResult(data);
     refreshAccuracy();
-    setStatus(`Done in ${data.elapsed_ms} ms · LLM: ${data.llm_used ? 'ON ✦' : 'OFF'}`);
+    setStatus(`Done in ${data.elapsed_ms} ms · LLM: ${data.llm_enabled ? 'ON ✦' : 'OFF'}`);
+    refreshR2();
   } catch (e) {
     setStatus('Request failed: ' + e.message);
   } finally {
@@ -578,12 +585,32 @@ function renderResult(d) {
   document.getElementById('rsk-tp').textContent    = fmt(rsk.take_profit);
   document.getElementById('rsk-score').textContent = (rsk.overall_risk_score*100).toFixed(0)+'%';
 
-  // LLM indicator (re-check after analysis result)
+  // LLM indicator
   if (d.llm_enabled) {
-    const label = d.llm_provider === 'gemini' ? 'Gemini' : d.llm_provider === 'anthropic' ? 'Claude' : 'LLM';
+    const label = d.llm_provider === 'gemini' ? 'Gemini 2.5-flash' : d.llm_provider === 'anthropic' ? 'Claude' : 'LLM';
     document.getElementById('llm-status').textContent = `LLM: ${label} ✓`;
     document.getElementById('llm-status').classList.remove('llm-off');
   }
+
+  // Show LLM raw response panel
+  const llmCard = document.getElementById('llm-response-card');
+  const preds = d.predictions || {};
+  const llmRespData = {
+    llm_enabled: d.llm_enabled,
+    provider: d.llm_provider || null,
+    decision_direction: d.decision?.direction,
+    decision_justification: d.decision?.justification,
+    llm_watch_for: d.decision?.llm_watch_for || null,
+    llm_confirmed_pattern: d.pattern?.llm_confirmed || null,
+    predicted_close_price_llm: preds.llm_predicted_price ?? null,
+    predicted_close_price_ols: preds.ols_predicted_price ?? null,
+    current_price: preds.current_price ?? null,
+  };
+  console.log('[QuantAgent] LLM response data:', JSON.stringify(llmRespData, null, 2));
+  llmCard.hidden = false;
+  document.getElementById('llm-resp-provider').textContent =
+    d.llm_enabled ? `(${d.llm_provider || 'gemini'})` : '(rule-based only)';
+  document.getElementById('llm-resp-json').textContent = JSON.stringify(llmRespData, null, 2);
 
   pushChart(d.ohlc, d.symbol);
 }
@@ -591,9 +618,31 @@ function renderResult(d) {
 // ── Accuracy ───────────────────────────────────────────────────────────
 async function refreshAccuracy() {
   const data = await (await fetch(`/api/accuracy?session_id=${S.sessionId}`)).json();
-  document.getElementById('acc-pct').textContent   = data.accuracy_pct != null ? data.accuracy_pct.toFixed(1)+'%' : '—';
-  document.getElementById('acc-total').textContent = data.total || 0;
-  document.getElementById('acc-rcc').textContent   = data.avg_rcc != null ? data.avg_rcc.toFixed(4) : '—';
+  const pct = data.accuracy_pct ?? data.accuracy;
+  document.getElementById('acc-pct').textContent   = pct != null ? Number(pct).toFixed(1)+'%' : '—';
+  document.getElementById('acc-total').textContent = data.total ?? data.total_predictions ?? 0;
+  document.getElementById('acc-rcc').textContent   = data.avg_rcc != null ? Number(data.avg_rcc).toFixed(4) : '—';
+}
+
+// ── R² scores ──────────────────────────────────────────────────────────
+async function refreshR2() {
+  try {
+    const data = await (await fetch(`/api/r2_scores?session_id=${S.sessionId}`)).json();
+    console.log('[QuantAgent] R² scores:', JSON.stringify(data, null, 2));
+    const fmt = v => v != null ? Number(v).toFixed(4) : '—';
+    document.getElementById('r2-ols').textContent = fmt(data.r2_ols);
+    document.getElementById('r2-llm').textContent = fmt(data.r2_llm);
+    document.getElementById('r2-n').textContent   = data.n_samples ?? 0;
+
+    // Show last prediction vs actual
+    const recent = (data.recent || []).slice(-1)[0];
+    if (recent) {
+      const olsDiff = recent.ols != null ? (recent.ols - recent.actual).toFixed(2) : 'N/A';
+      const llmDiff = recent.llm != null ? (recent.llm - recent.actual).toFixed(2) : 'N/A';
+      document.getElementById('r2-latest').textContent =
+        `Last: actual ₹${Number(recent.actual).toFixed(2)} · OLS err ${olsDiff} · LLM err ${llmDiff}`;
+    }
+  } catch (_) {}
 }
 
 // ── Streaming ──────────────────────────────────────────────────────────

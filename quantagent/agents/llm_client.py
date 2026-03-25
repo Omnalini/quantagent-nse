@@ -56,13 +56,15 @@ Agent signals:
 - Risk/Reward: {rr_ratio:.2f} | SL ₹{sl:.2f} | TP ₹{tp:.2f}
 
 Choose LONG or SHORT (no HOLD). Horizon: next 3×{timeframe} (~{horizon_min} min).
+Also predict the numeric close price for the NEXT single {timeframe} bar.
 
 Reply in JSON only (no markdown fence):
 {{
   "decision": "<LONG|SHORT>",
   "justification": "<2-3 sentences citing strongest signals>",
   "risk_reward_ratio": <1.2-1.8>,
-  "watch_for": "<one invalidation signal>"
+  "watch_for": "<one invalidation signal>",
+  "predicted_close_price": <your best numeric estimate of next {timeframe} bar close price as float>
 }}"""
 
 
@@ -150,6 +152,18 @@ class LLMClient:
             return self._gem_text(prompt)
         return {}
 
+    def _safe_gem_text(self, resp) -> str:
+        """Extract text from a Gemini response safely (handles thinking models where resp.text may be None)."""
+        if resp.text:
+            return resp.text.strip()
+        try:
+            for part in resp.candidates[0].content.parts:
+                if getattr(part, 'text', None):
+                    return part.text.strip()
+        except Exception:
+            pass
+        return ""
+
     def ping(self) -> dict:
         """Quick connectivity check. Returns {"ok": bool, "provider": str, "reply"/"error": str}."""
         if self._gem:
@@ -157,9 +171,10 @@ class LLMClient:
                 resp = self._gem.models.generate_content(
                     model="gemini-2.5-flash",
                     contents="Reply with the single word: ok",
-                    config=_gtypes.GenerateContentConfig(max_output_tokens=10, temperature=0),
+                    config=_gtypes.GenerateContentConfig(max_output_tokens=64, temperature=0),
                 )
-                return {"ok": True, "provider": "gemini", "reply": resp.text.strip()}
+                text = self._safe_gem_text(resp)
+                return {"ok": True, "provider": "gemini", "reply": text or "(empty response)"}
             except Exception as e:
                 return {"ok": False, "provider": "gemini", "error": str(e)}
         if self._ant:
@@ -216,7 +231,9 @@ class LLMClient:
                     temperature=0.2,
                 ),
             )
-            raw = resp.text.strip()
+            raw = self._safe_gem_text(resp)
+            if not raw:
+                return {"error": "Empty response from Gemini vision"}
             # Strip markdown fences if model adds them
             if raw.startswith("```"):
                 raw = raw.split("```")[1]
@@ -236,7 +253,9 @@ class LLMClient:
                     temperature=0.2,
                 ),
             )
-            raw = resp.text.strip()
+            raw = self._safe_gem_text(resp)
+            if not raw:
+                return {"error": "Empty response from Gemini"}
             if raw.startswith("```"):
                 raw = raw.split("```")[1]
                 if raw.startswith("json"):

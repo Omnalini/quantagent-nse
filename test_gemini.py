@@ -1,11 +1,3 @@
-"""
-Gemini API connectivity test.
-Uses google-genai (same library as llm_client.py).
-
-Install if needed:
-    pip install google-genai
-"""
-
 API_KEY = "AIzaSyB5zTW5tksNaqb90pqiDezgTz8wtiABl1s"
 
 try:

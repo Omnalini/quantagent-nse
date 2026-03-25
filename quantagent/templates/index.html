@@ -252,6 +252,11 @@ button:disabled{opacity:.45;cursor:not-allowed}
           <div style="color:var(--muted);font-size:11px">No data yet</div>
         </div>
         <div style="margin-top:8px;font-size:11px;color:var(--muted)" id="ind-summary"></div>
+        <!-- LLM Indicator Narrative -->
+        <div id="llm-ind-block" hidden style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">
+          <div style="font-size:10px;color:var(--accent);margin-bottom:4px">✦ LLM Analysis:</div>
+          <div style="font-size:11px;color:var(--muted);line-height:1.5" id="llm-ind-narrative"></div>
+        </div>
       </div>
 
       <!-- Pattern -->
@@ -298,6 +303,12 @@ button:disabled{opacity:.45;cursor:not-allowed}
           <span class="stat-val" id="tre-cw">—</span>
         </div>
         <div style="margin-top:8px;font-size:11px;color:var(--muted)" id="tre-pred"></div>
+        <!-- LLM Trend Narrative -->
+        <div id="llm-tre-block" hidden style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">
+          <div style="font-size:10px;color:var(--accent);margin-bottom:4px">✦ LLM Analysis:</div>
+          <div style="font-size:12px;font-weight:600;margin-bottom:3px" id="llm-tre-signal"></div>
+          <div style="font-size:11px;color:var(--muted);line-height:1.5" id="llm-tre-narrative"></div>
+        </div>
       </div>
 
       <!-- Risk -->
@@ -354,7 +365,7 @@ button:disabled{opacity:.45;cursor:not-allowed}
     <!-- LLM last response (raw JSON) -->
     <div class="card" id="llm-response-card" hidden>
       <div class="card-title">LLM Raw Response <span id="llm-resp-provider" style="color:var(--accent)"></span></div>
-      <pre id="llm-resp-json" style="font-size:10px;color:var(--text);white-space:pre-wrap;word-break:break-all;max-height:180px;overflow-y:auto;background:#0d1117;border-radius:4px;padding:8px"></pre>
+      <pre id="llm-resp-json" style="font-size:10px;color:var(--text);white-space:pre-wrap;word-break:break-all;max-height:500px;overflow-y:auto;background:#0d1117;border-radius:4px;padding:8px"></pre>
     </div>
 
     <!-- Backtest results -->
@@ -593,22 +604,32 @@ function renderResult(d) {
   const ind = d.indicators;
   const sigCls = s => s==='Bullish'?'sig-bull':s==='Bearish'?'sig-bear':'sig-neu';
   const rows = [
-    {name:'RSI',   val:ind.rsi.value.toFixed(1),   sig:ind.rsi.signal},
-    {name:'MACD',  val:ind.macd.value.toFixed(4),  sig:ind.macd.signal},
-    {name:'ROC',   val:ind.roc.value.toFixed(3),   sig:ind.roc.signal},
-    {name:'STOCH', val:ind.stoch.value.toFixed(1), sig:ind.stoch.signal},
-    {name:'WILLR', val:ind.willr.value.toFixed(1), sig:ind.willr.signal},
+    {name:'RSI',   val:ind.rsi.value.toFixed(1),   sig:ind.rsi.signal,   llm:ind.rsi.llm_analysis||''},
+    {name:'MACD',  val:ind.macd.value.toFixed(4),  sig:ind.macd.signal,  llm:ind.macd.llm_analysis||''},
+    {name:'ROC',   val:ind.roc.value.toFixed(3),   sig:ind.roc.signal,   llm:ind.roc.llm_analysis||''},
+    {name:'STOCH', val:ind.stoch.value.toFixed(1), sig:ind.stoch.signal, llm:ind.stoch.llm_analysis||''},
+    {name:'WILLR', val:ind.willr.value.toFixed(1), sig:ind.willr.signal, llm:ind.willr.llm_analysis||''},
   ];
   document.getElementById('ind-list').innerHTML = rows.map(r =>
-    `<div class="ind-item">
-      <span class="ind-name">${r.name}</span>
-      <span class="ind-val">${r.val}</span>
-      <span class="ind-sig ${sigCls(r.sig)}">${r.sig}</span>
+    `<div class="ind-item" style="flex-direction:column;align-items:stretch;gap:0">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <span class="ind-name">${r.name}</span>
+        <span class="ind-val">${r.val}</span>
+        <span class="ind-sig ${sigCls(r.sig)}">${r.sig}</span>
+      </div>
+      ${r.llm ? `<div style="font-size:10px;color:var(--muted);margin-top:3px;line-height:1.4">${r.llm}</div>` : ''}
     </div>`
   ).join('');
   const oc = ind.overall==='Bullish'?'bull':ind.overall==='Bearish'?'bear':'neutral';
   document.getElementById('ind-overall').innerHTML = `<span class="${oc}">${ind.overall}</span>`;
-  document.getElementById('ind-summary').textContent = ind.summary;
+  // LLM narrative as primary; fall back to algorithmic summary
+  const indNarrative = (d.llm_enabled && ind.llm_narrative) ? ind.llm_narrative : ind.summary;
+  document.getElementById('ind-summary').textContent = indNarrative;
+  if (d.llm_enabled && ind.llm_narrative) {
+    document.getElementById('llm-ind-block').hidden = true; // narrative already shown in summary
+  } else {
+    document.getElementById('llm-ind-block').hidden = true;
+  }
 
   // Pattern
   const pat = d.pattern;
@@ -633,7 +654,17 @@ function renderResult(d) {
   document.getElementById('tre-kappa').textContent = tre.kappa.toExponential(2);
   document.getElementById('tre-brk').textContent  = (tre.breakout_probability*100).toFixed(0)+'%';
   document.getElementById('tre-cw').textContent   = tre.channel_width.toFixed(2);
-  document.getElementById('tre-pred').textContent = tre.prediction;
+  // LLM narrative as primary; fall back to algorithmic prediction
+  document.getElementById('tre-pred').textContent = (d.llm_enabled && tre.llm_narrative) ? '' : tre.prediction;
+  if (d.llm_enabled && tre.llm_narrative) {
+    document.getElementById('llm-tre-block').hidden = false;
+    const sigLabel = tre.llm_signal_label || tre.classification;
+    const sigCls2 = sigLabel.includes('Uptrend')||sigLabel.includes('Up') ? 'bull' : sigLabel.includes('Down') ? 'bear' : 'neutral';
+    document.getElementById('llm-tre-signal').innerHTML = `<span class="${sigCls2}">${sigLabel}</span>`;
+    document.getElementById('llm-tre-narrative').textContent = tre.llm_narrative;
+  } else {
+    document.getElementById('llm-tre-block').hidden = true;
+  }
 
   // Risk
   const rsk = d.risk;
@@ -650,20 +681,56 @@ function renderResult(d) {
     document.getElementById('llm-status').classList.remove('llm-off');
   }
 
-  // Show LLM raw response panel
+  // Show LLM raw response panel — full LLM output when available
   const llmCard = document.getElementById('llm-response-card');
   const preds = d.predictions || {};
-  const llmRespData = {
-    llm_enabled: d.llm_enabled,
-    provider: d.llm_provider || null,
+  const ind2 = d.indicators || {};
+  const tre2 = d.trend || {};
+  const pat2 = d.pattern || {};
+  const llmRespData = d.llm_enabled ? {
+    provider: d.llm_provider,
     llm_errors: d.llm_errors || null,
-    decision_direction: d.decision?.direction,
-    llm_watch_for: d.decision?.llm_watch_for || null,
-    llm_confirmed_pattern: d.pattern?.llm_confirmed || null,
-    predicted_close_price_llm: preds.llm_predicted_price ?? null,
-    predicted_close_price_ols: preds.ols_predicted_price ?? null,
-    current_price: preds.current_price ?? null,
-  };
+    // Indicator Agent
+    indicator_agent: {
+      overall_signal: ind2.overall,
+      llm_narrative: ind2.llm_narrative || null,
+      rsi_analysis:  ind2.rsi?.llm_analysis  || null,
+      macd_analysis: ind2.macd?.llm_analysis || null,
+      roc_analysis:  ind2.roc?.llm_analysis  || null,
+      stoch_analysis: ind2.stoch?.llm_analysis || null,
+      willr_analysis: ind2.willr?.llm_analysis || null,
+    },
+    // Pattern Agent
+    pattern_agent: {
+      algo_pattern:     pat2.name,
+      llm_confirmed:    pat2.llm_confirmed || null,
+      llm_structure:    pat2.llm_structure || null,
+      llm_trend:        pat2.llm_trend     || null,
+      llm_symmetry:     pat2.llm_symmetry  || null,
+    },
+    // Trend Agent
+    trend_agent: {
+      classification:    tre2.classification,
+      llm_signal_label:  tre2.llm_signal_label  || null,
+      llm_adx_strength:  tre2.llm_adx_strength  || null,
+      llm_momentum_note: tre2.llm_momentum_note || null,
+      llm_narrative:     tre2.llm_narrative      || null,
+    },
+    // Decision Agent
+    decision_agent: {
+      direction:    d.decision?.direction,
+      justification: d.decision?.justification || null,
+      watch_for:    d.decision?.llm_watch_for  || null,
+      risk_reward:  d.decision?.risk_reward_ratio ?? null,
+    },
+    // Price predictions
+    predictions: {
+      current_price:        preds.current_price ?? null,
+      ols_predicted_price:  preds.ols_predicted_price ?? null,
+      llm_predicted_price:  preds.llm_predicted_price ?? null,
+    },
+  } : { llm_enabled: false, note: 'No API key — rule-based analysis only' };
+
   console.log('[QuantAgent] LLM response data:', JSON.stringify(llmRespData, null, 2));
   llmCard.hidden = false;
   document.getElementById('llm-resp-provider').textContent =

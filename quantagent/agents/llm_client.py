@@ -31,33 +31,54 @@ except ImportError:
 
 # ── Prompt templates (shared between providers) ───────────────────────────
 
-COMBINED_PROMPT = """You are an expert HFT analyst and chart-pattern specialist for NSE Indian equities.
+COMBINED_PROMPT = """You are an expert HFT analyst for NSE Indian equities, acting as four specialized agents.
 Asset: {symbol} | Timeframe: {timeframe} | Entry: ₹{entry:.2f}
 
 A {timeframe} candlestick chart is attached.
-Algorithmic pre-scan detected: {algo_pattern} (confidence {confidence:.0%}).
 
-Agent signals:
-- Indicators : {indicator_overall} (RSI {rsi:.1f}, MACD {macd:.4f})
-- Pattern    : {pattern_name} ({pattern_dir}, conf {pattern_conf:.0%})
-- Trend      : {trend} (κ={kappa:.5f}, breakout_prob {breakout:.0%})
-- Risk/Reward: {rr_ratio:.2f} | SL ₹{sl:.2f} | TP ₹{tp:.2f}
+=== COMPUTED INPUTS ===
+[Indicator Agent values]
+RSI(14): {rsi:.2f} | MACD line: {macd:.4f} | ROC: {roc:.4f}
+Stochastic %K: {stoch_k:.2f} | Williams %R: {willr:.2f}
+Overall indicator signal: {indicator_overall}
 
+[Pattern Agent scan]
+Detected: {algo_pattern} (confidence {confidence:.0%}) | Direction: {pattern_dir} | Reliability: {pattern_conf:.0%}
+
+[Trend Agent metrics]
+Trend: {trend} | κ={kappa:.5f} | Breakout prob: {breakout:.0%}
+Momentum: {momentum_strength} | Channel width: ₹{channel_width:.2f}
+Signals: {signals}
+
+[Risk metrics]
+R/R: {rr_ratio:.2f} | SL ₹{sl:.2f} | TP ₹{tp:.2f}
+
+=== YOUR OUTPUT ===
 Choose LONG or SHORT (no HOLD). Horizon: next 3×{timeframe} (~{horizon_min} min).
-Also predict the numeric close price for the NEXT single {timeframe} bar.
+Predict close price for the NEXT single {timeframe} bar.
 
 Reply in JSON only (no markdown fence):
 {{
+  "rsi_analysis": "<one sentence on RSI momentum/overbought-oversold>",
+  "macd_analysis": "<one sentence on MACD crossover and momentum direction>",
+  "roc_analysis": "<one sentence on rate of change momentum>",
+  "stoch_analysis": "<one sentence on stochastic overbought/oversold signal>",
+  "willr_analysis": "<one sentence on Williams %R reading>",
+  "indicator_narrative": "<2-3 sentence overall indicator summary>",
   "confirmed_pattern": "<pattern name or None>",
   "direction": "<Bullish|Bearish|Neutral>",
-  "structure": "<one sentence on highs/lows/shape>",
+  "structure": "<one sentence on highs/lows/shape from chart>",
   "trend_context": "<one sentence on surrounding trend>",
-  "symmetry": "<one sentence on shape symmetry>",
+  "symmetry": "<one sentence on pattern shape symmetry>",
   "pattern_confidence": <0.0-1.0>,
+  "trend_signal_label": "<Likely Uptrend Signal|Likely Downtrend Signal|Sideways Consolidation>",
+  "adx_strength": "<Strong|Moderate|Weak> trend strength",
+  "momentum_note": "<one sentence on momentum state>",
+  "trend_narrative": "<2-3 sentence trend analysis with support/resistance context>",
   "decision": "<LONG|SHORT>",
-  "justification": "<2-3 sentences citing strongest signals>",
+  "justification": "<2-3 sentences citing the strongest cross-agent signals>",
   "risk_reward_ratio": <1.2-1.8>,
-  "watch_for": "<one invalidation signal>",
+  "watch_for": "<one invalidation signal to monitor>",
   "predicted_close_price": <numeric float estimate of next {timeframe} bar close>
 }}"""
 
@@ -110,19 +131,24 @@ class LLMClient:
         symbol: str, timeframe: str, entry: float,
         algo_pattern: str, algo_confidence: float,
         indicator_overall: str, rsi: float, macd: float,
-        pattern_name: str, pattern_dir: str, pattern_conf: float,
-        trend: str, kappa: float, breakout_prob: float,
-        rr_ratio: float, sl: float, tp: float,
+        roc: float = 0.0, stoch_k: float = 50.0, willr: float = -50.0,
+        pattern_name: str = "", pattern_dir: str = "Neutral", pattern_conf: float = 0.5,
+        trend: str = "Sideways", kappa: float = 0.0, breakout_prob: float = 0.0,
+        momentum_strength: str = "Moderate", channel_width: float = 0.0, signals: str = "",
+        rr_ratio: float = 1.5, sl: float = 0.0, tp: float = 0.0,
         horizon_min: int = 45,
     ) -> dict:
-        """Single combined call: pattern recognition + trade decision (saves 1 API request)."""
+        """Single combined call: all four agent narratives + final trade decision."""
         prompt = COMBINED_PROMPT.format(
             symbol=symbol, timeframe=timeframe, entry=entry,
             algo_pattern=algo_pattern, confidence=algo_confidence,
             indicator_overall=indicator_overall, rsi=rsi, macd=macd,
+            roc=roc, stoch_k=stoch_k, willr=willr,
             pattern_name=pattern_name, pattern_dir=pattern_dir,
             pattern_conf=pattern_conf, trend=trend, kappa=kappa,
-            breakout=breakout_prob, rr_ratio=rr_ratio, sl=sl, tp=tp,
+            breakout=breakout_prob, momentum_strength=momentum_strength,
+            channel_width=channel_width, signals=signals,
+            rr_ratio=rr_ratio, sl=sl, tp=tp,
             horizon_min=horizon_min,
         )
         if self._ant:
@@ -134,22 +160,24 @@ class LLMClient:
     def _safe_gem_text(self, resp) -> str:
         """
         Extract output text from a Gemini response.
-        For thinking models (gemini-2.5-flash), the response has two parts:
-        thought (internal reasoning) and output text. We want only the output.
-        resp.text should skip thought parts in the SDK, but if it's None we
-        fall back to iterating candidates, skipping thought parts explicitly.
+        For thinking models (gemini-2.5-flash), resp.text may return the
+        internal reasoning (no JSON) instead of the actual output.
+        We iterate parts directly and skip thought parts to get the real output.
         """
-        # SDK resp.text skips thought parts — use it first
-        if resp.text:
-            return resp.text.strip()
+        # Iterate parts first — explicitly skip thought parts
         try:
-            # Fallback: find the last non-thought text part (output comes after thinking)
             parts = resp.candidates[0].content.parts
             for part in reversed(parts):
                 text = getattr(part, 'text', None)
                 is_thought = getattr(part, 'thought', False)
                 if text and not is_thought:
                     return text.strip()
+        except Exception:
+            pass
+        # Fallback: SDK resp.text (may include thinking content on some SDK versions)
+        try:
+            if resp.text:
+                return resp.text.strip()
         except Exception:
             pass
         return ""
@@ -203,14 +231,14 @@ class LLMClient:
         try:
             resp = self._ant.messages.create(
                 model="claude-haiku-4-5-20251001",
-                max_tokens=1024,
+                max_tokens=2048,
                 messages=[{"role": "user", "content": [
                     {"type": "image",
                      "source": {"type": "base64", "media_type": "image/png", "data": b64}},
                     {"type": "text", "text": prompt},
                 ]}],
             )
-            return json.loads(resp.content[0].text.strip())
+            return self._extract_json(resp.content[0].text.strip())
         except Exception as e:
             return {"error": str(e)}
 
@@ -218,10 +246,10 @@ class LLMClient:
         try:
             resp = self._ant.messages.create(
                 model="claude-haiku-4-5-20251001",
-                max_tokens=768,
+                max_tokens=2048,
                 messages=[{"role": "user", "content": prompt}],
             )
-            return json.loads(resp.content[0].text.strip())
+            return self._extract_json(resp.content[0].text.strip())
         except Exception as e:
             return {"error": str(e)}
 
@@ -230,14 +258,15 @@ class LLMClient:
     def _gem_vision(self, png: bytes, prompt: str) -> dict:
         try:
             img_part = _gtypes.Part.from_bytes(data=png, mime_type="image/png")
+            cfg = {"max_output_tokens": 2048, "temperature": 0.2}
+            try:
+                cfg["thinking_config"] = _gtypes.ThinkingConfig(thinking_budget=0)
+            except Exception:
+                pass  # older SDK without ThinkingConfig
             resp = self._gem.models.generate_content(
                 model="gemini-2.5-flash",
                 contents=[img_part, prompt],
-                config=_gtypes.GenerateContentConfig(
-                    max_output_tokens=1024,
-                    temperature=0.2,
-                    response_mime_type="application/json",
-                ),
+                config=_gtypes.GenerateContentConfig(**cfg),
             )
             raw = self._safe_gem_text(resp)
             return self._extract_json(raw)
@@ -246,13 +275,15 @@ class LLMClient:
 
     def _gem_text(self, prompt: str) -> dict:
         try:
+            cfg = {"max_output_tokens": 768, "temperature": 0.2}
+            try:
+                cfg["thinking_config"] = _gtypes.ThinkingConfig(thinking_budget=0)
+            except Exception:
+                pass
             resp = self._gem.models.generate_content(
                 model="gemini-2.5-flash",
                 contents=prompt,
-                config=_gtypes.GenerateContentConfig(
-                    max_output_tokens=768,
-                    temperature=0.2,
-                ),
+                config=_gtypes.GenerateContentConfig(**cfg),
             )
             raw = self._safe_gem_text(resp)
             return self._extract_json(raw)

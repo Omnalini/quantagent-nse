@@ -342,10 +342,34 @@ const S = {
   await loadStocks();
   buildChart();
   checkMarket();
+  checkLLMStatus();
   refreshPrice();          // independent 1m quote, unaffected by timeframe
   setInterval(refreshPrice, 60_000);
   setStatus('Ready.');
 })();
+
+// ── LLM status check ───────────────────────────────────────────────────
+async function checkLLMStatus() {
+  const badge = document.getElementById('llm-status');
+  badge.textContent = 'LLM: checking…';
+  try {
+    const data = await (await fetch('/api/llm_status')).json();
+    console.log('[QuantAgent] LLM status:', JSON.stringify(data, null, 2));
+    if (data.llm_available) {
+      const label = data.provider === 'gemini' ? 'Gemini' : 'Claude';
+      badge.textContent = `LLM: ${label} ✓`;
+      badge.classList.remove('llm-off');
+    } else {
+      badge.textContent = 'LLM: ' + (data.status === 'no_key' ? 'No Key' : 'Error');
+      badge.classList.add('llm-off');
+      console.warn('[QuantAgent] LLM unavailable:', data.error || data.status);
+    }
+  } catch (e) {
+    badge.textContent = 'LLM: Error';
+    badge.classList.add('llm-off');
+    console.error('[QuantAgent] LLM status check failed:', e.message);
+  }
+}
 
 // ── Live price (always 1m, ignores analysis timeframe/period) ──────────
 async function refreshPrice() {
@@ -554,9 +578,12 @@ function renderResult(d) {
   document.getElementById('rsk-tp').textContent    = fmt(rsk.take_profit);
   document.getElementById('rsk-score').textContent = (rsk.overall_risk_score*100).toFixed(0)+'%';
 
-  // LLM indicator
-  document.getElementById('llm-status').textContent = d.llm_enabled ? 'LLM: ON' : 'LLM: OFF';
-  document.getElementById('llm-status').classList.toggle('llm-off', !d.llm_enabled);
+  // LLM indicator (re-check after analysis result)
+  if (d.llm_enabled) {
+    const label = d.llm_provider === 'gemini' ? 'Gemini' : d.llm_provider === 'anthropic' ? 'Claude' : 'LLM';
+    document.getElementById('llm-status').textContent = `LLM: ${label} ✓`;
+    document.getElementById('llm-status').classList.remove('llm-off');
+  }
 
   pushChart(d.ohlc, d.symbol);
 }

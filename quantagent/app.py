@@ -7,6 +7,9 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from dotenv import load_dotenv
+load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env'))
+
 import json
 import time
 import uuid
@@ -41,8 +44,11 @@ DEFAULT_PERIOD    = "5d"
 # ── Helpers ───────────────────────────────────────────────────────────────
 
 def _get_api_key(request_data: dict) -> str | None:
-    """Read API key from request body (never from URL params)."""
-    return request_data.get("api_key") or request.headers.get("X-Api-Key")
+    """Read API key: request body → header → session → .env fallback."""
+    return (request_data.get("api_key")
+            or request.headers.get("X-Api-Key")
+            or session.get("api_key")
+            or os.environ.get("GEMINI_API_KEY"))
 
 
 def _fetch_df(symbol: str, interval: str, period: str) -> pd.DataFrame:
@@ -102,6 +108,26 @@ def set_api_key():
     return jsonify({"status": "ok", "llm_enabled": True, "provider": provider})
 
 
+@app.route('/api/llm_status', methods=['GET'])
+def llm_status():
+    """Ping the LLM to confirm connectivity. Returns JSON with ok/error details."""
+    from agents.llm_client import LLMClient
+    api_key = session.get("api_key") or os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        return jsonify({"llm_available": False, "status": "no_key", "provider": None})
+    client = LLMClient(api_key=api_key)
+    if not client.available:
+        return jsonify({"llm_available": False, "status": "import_error", "provider": client.provider})
+    result = client.ping()
+    return jsonify({
+        "llm_available": result["ok"],
+        "status": "ok" if result["ok"] else "error",
+        "provider": result.get("provider"),
+        "reply": result.get("reply"),
+        "error": result.get("error"),
+    })
+
+
 @app.route('/api/analyze', methods=['POST'])
 def analyze():
     """
@@ -119,7 +145,7 @@ def analyze():
     interval   = data.get("interval", DEFAULT_INTERVAL)
     period     = data.get("period", DEFAULT_PERIOD)
     session_id = data.get("session_id", str(uuid.uuid4()))
-    api_key    = _get_api_key(data) or session.get("api_key")
+    api_key    = _get_api_key(data)
 
     df = _fetch_df(symbol, interval, period)
     if len(df) < 30:
@@ -159,7 +185,9 @@ def analyze():
     result["prediction_id"] = pred_id
     result["session_id"]    = session_id
     result["symbol"]        = symbol
-    result["llm_used"]      = bool(api_key)
+    result["llm_enabled"]   = bool(api_key)
+    result["llm_provider"]  = ("gemini" if api_key and api_key.startswith("AIza")
+                               else "anthropic" if api_key else None)
     result["market_open"]   = is_market_open()
 
     return jsonify(result)

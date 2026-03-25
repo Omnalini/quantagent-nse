@@ -150,6 +150,30 @@ class LLMClient:
             return self._gem_text(prompt)
         return {}
 
+    def ping(self) -> dict:
+        """Quick connectivity check. Returns {"ok": bool, "provider": str, "reply"/"error": str}."""
+        if self._gem:
+            try:
+                resp = self._gem.models.generate_content(
+                    model="gemini-2.5-flash",
+                    contents="Reply with the single word: ok",
+                    config=_gtypes.GenerateContentConfig(max_output_tokens=10, temperature=0),
+                )
+                return {"ok": True, "provider": "gemini", "reply": resp.text.strip()}
+            except Exception as e:
+                return {"ok": False, "provider": "gemini", "error": str(e)}
+        if self._ant:
+            try:
+                resp = self._ant.messages.create(
+                    model="claude-haiku-4-5-20251001",
+                    max_tokens=10,
+                    messages=[{"role": "user", "content": "Reply with the single word: ok"}],
+                )
+                return {"ok": True, "provider": "anthropic", "reply": resp.content[0].text.strip()}
+            except Exception as e:
+                return {"ok": False, "provider": "anthropic", "error": str(e)}
+        return {"ok": False, "provider": "none", "error": "No API client initialized"}
+
     # ── Anthropic backend ─────────────────────────────────────────────────
 
     def _ant_vision(self, png: bytes, prompt: str) -> dict:
@@ -185,7 +209,7 @@ class LLMClient:
         try:
             img_part = _gtypes.Part.from_bytes(data=png, mime_type="image/png")
             resp = self._gem.models.generate_content(
-                model="gemini-2.0-flash",
+                model="gemini-2.5-flash",
                 contents=[img_part, prompt],
                 config=_gtypes.GenerateContentConfig(
                     max_output_tokens=512,
@@ -205,7 +229,7 @@ class LLMClient:
     def _gem_text(self, prompt: str) -> dict:
         try:
             resp = self._gem.models.generate_content(
-                model="gemini-2.0-flash",
+                model="gemini-2.5-flash",
                 contents=prompt,
                 config=_gtypes.GenerateContentConfig(
                     max_output_tokens=768,

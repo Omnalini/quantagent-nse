@@ -153,16 +153,44 @@ class LLMClient:
         return {}
 
     def _safe_gem_text(self, resp) -> str:
-        """Extract text from a Gemini response safely (handles thinking models where resp.text may be None)."""
+        """
+        Extract output text from a Gemini response.
+        For thinking models (gemini-2.5-flash), the response has two parts:
+        thought (internal reasoning) and output text. We want only the output.
+        resp.text should skip thought parts in the SDK, but if it's None we
+        fall back to iterating candidates, skipping thought parts explicitly.
+        """
+        # SDK resp.text skips thought parts — use it first
         if resp.text:
             return resp.text.strip()
         try:
-            for part in resp.candidates[0].content.parts:
-                if getattr(part, 'text', None):
-                    return part.text.strip()
+            # Fallback: find the last non-thought text part (output comes after thinking)
+            parts = resp.candidates[0].content.parts
+            for part in reversed(parts):
+                text = getattr(part, 'text', None)
+                is_thought = getattr(part, 'thought', False)
+                if text and not is_thought:
+                    return text.strip()
         except Exception:
             pass
         return ""
+
+    def _extract_json(self, raw: str) -> dict:
+        """
+        Robustly extract a JSON object from model response.
+        Handles: markdown fences, thinking prose before/after, stray text.
+        """
+        if not raw:
+            return {"error": "Empty response from model"}
+        # Find outermost { ... }
+        start = raw.find("{")
+        end   = raw.rfind("}") + 1
+        if start >= 0 and end > start:
+            try:
+                return json.loads(raw[start:end])
+            except json.JSONDecodeError as e:
+                return {"error": f"JSON parse failed: {e}", "preview": raw[start:start+300]}
+        return {"error": "No JSON object in response", "preview": raw[:300]}
 
     def ping(self) -> dict:
         """Quick connectivity check. Returns {"ok": bool, "provider": str, "reply"/"error": str}."""
@@ -232,14 +260,7 @@ class LLMClient:
                 ),
             )
             raw = self._safe_gem_text(resp)
-            if not raw:
-                return {"error": "Empty response from Gemini vision"}
-            # Strip markdown fences if model adds them
-            if raw.startswith("```"):
-                raw = raw.split("```")[1]
-                if raw.startswith("json"):
-                    raw = raw[4:]
-            return json.loads(raw.strip())
+            return self._extract_json(raw)
         except Exception as e:
             return {"error": str(e)}
 
@@ -254,12 +275,6 @@ class LLMClient:
                 ),
             )
             raw = self._safe_gem_text(resp)
-            if not raw:
-                return {"error": "Empty response from Gemini"}
-            if raw.startswith("```"):
-                raw = raw.split("```")[1]
-                if raw.startswith("json"):
-                    raw = raw[4:]
-            return json.loads(raw.strip())
+            return self._extract_json(raw)
         except Exception as e:
             return {"error": str(e)}

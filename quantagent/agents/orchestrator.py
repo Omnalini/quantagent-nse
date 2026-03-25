@@ -87,6 +87,7 @@ class QuantAgent:
 
         # ── Step 3b: LLM pattern enhancement (if key available) ───────
         llm_pattern: dict = {}
+        llm_pattern_error: str = ""
         if self.llm.available:
             try:
                 chart_png = self._render_pattern_chart(ohlc_df)
@@ -97,8 +98,11 @@ class QuantAgent:
                     algo_pattern=pattern_match.name,
                     algo_confidence=pattern_match.confidence,
                 )
-            except Exception:
+                if "error" in llm_pattern:
+                    llm_pattern_error = llm_pattern.pop("error", "")
+            except Exception as e:
                 llm_pattern = {}
+                llm_pattern_error = str(e)
 
         # ── Step 4: Risk ──────────────────────────────────────────────
         risk_assessment = self.risk_agent.analyze(
@@ -112,6 +116,7 @@ class QuantAgent:
 
         # ── Step 5b: LLM decision enhancement ────────────────────────
         llm_decision: dict = {}
+        llm_decision_error: str = ""
         if self.llm.available:
             try:
                 llm_decision = self.llm.synthesize_decision(
@@ -132,8 +137,10 @@ class QuantAgent:
                     tp=decision.take_profit,
                     horizon_min=self.horizon_min,
                 )
+                if "error" in llm_decision:
+                    llm_decision_error = llm_decision.pop("error", "")
                 # Override algo decision with LLM if successful
-                if "decision" in llm_decision and "error" not in llm_decision:
+                elif "decision" in llm_decision:
                     direction = llm_decision["decision"].upper()
                     if direction in ("LONG", "SHORT"):
                         decision.direction = direction
@@ -141,22 +148,25 @@ class QuantAgent:
                         decision.justification = llm_decision["justification"]
                     if "risk_reward_ratio" in llm_decision:
                         decision.risk_reward_ratio = float(llm_decision["risk_reward_ratio"])
-            except Exception:
+            except Exception as e:
                 llm_decision = {}
+                llm_decision_error = str(e)
 
         elapsed = time.time() - t0
 
         return self._serialize(
             decision, indicator_report, pattern_match, trend_report,
             risk_assessment, ohlc_df, elapsed, llm_pattern, llm_decision,
-            ols_predicted_price
+            ols_predicted_price, llm_pattern_error, llm_decision_error
         )
 
     # ── Serialization ─────────────────────────────────────────────────────
 
     def _serialize(self, decision: TradeDecision, ind, pat, tre, risk,
                    ohlc_df, elapsed, llm_pattern, llm_decision,
-                   ols_predicted_price: float = 0.0) -> Dict:
+                   ols_predicted_price: float = 0.0,
+                   llm_pattern_error: str = "",
+                   llm_decision_error: str = "") -> Dict:
 
         closes = ohlc_df['close'].values.astype(float)
         highs  = ohlc_df['high'].values.astype(float)
@@ -186,6 +196,10 @@ class QuantAgent:
             "symbol":      self.symbol,
             "elapsed_ms":  round(elapsed * 1000, 1),
             "llm_enabled": self.llm.available,
+            "llm_errors": {
+                "pattern": llm_pattern_error or None,
+                "decision": llm_decision_error or None,
+            },
             "predictions": {
                 "current_price":      round(float(closes[-1]), 2),
                 "ols_predicted_price": round(ols_predicted_price, 2),

@@ -469,7 +469,16 @@ function buildChart() {
 function pushChart(ohlc, sym) {
   if (!ohlc?.close) return;
   document.getElementById('chart-sym').textContent = sym || S.symbol;
-  S.chart.data.labels = ohlc.close.map((_,i) => i % 10 === 0 ? i : '');
+  const ts = ohlc.timestamps || [];
+  S.chart.data.labels = ohlc.close.map((_, i) => {
+    if (i % 8 !== 0) return '';
+    const t = ts[i];
+    if (!t) return i;
+    const d = new Date(t * 1000);   // Unix seconds → ms
+    const dd = d.toLocaleDateString('en-IN', {month:'short', day:'numeric'});
+    const tt = d.toLocaleTimeString('en-IN', {hour:'2-digit', minute:'2-digit'});
+    return `${dd} ${tt}`;
+  });
   S.chart.data.datasets[0].data = ohlc.close;
   S.chart.update('none');
 }
@@ -497,8 +506,11 @@ async function runAnalysis() {
     if (data.error) { setStatus('Error: ' + data.error); return; }
     renderResult(data);
     refreshAccuracy();
-    setStatus(`Done in ${data.elapsed_ms} ms · LLM: ${data.llm_enabled ? 'ON ✦' : 'OFF'}`);
-    refreshR2();
+    const llmErrors = data.llm_errors || {};
+    const errMsg = llmErrors.decision || llmErrors.pattern || '';
+    setStatus(`Done in ${data.elapsed_ms} ms · LLM: ${data.llm_enabled ? 'ON ✦' : 'OFF'}${errMsg ? ' · LLM err: ' + errMsg.slice(0, 60) : ''}`);
+    if (errMsg) console.error('[QuantAgent] LLM error:', errMsg);
+    refreshR2(S.symbol);
   } catch (e) {
     setStatus('Request failed: ' + e.message);
   } finally {
@@ -598,8 +610,8 @@ function renderResult(d) {
   const llmRespData = {
     llm_enabled: d.llm_enabled,
     provider: d.llm_provider || null,
+    llm_errors: d.llm_errors || null,
     decision_direction: d.decision?.direction,
-    decision_justification: d.decision?.justification,
     llm_watch_for: d.decision?.llm_watch_for || null,
     llm_confirmed_pattern: d.pattern?.llm_confirmed || null,
     predicted_close_price_llm: preds.llm_predicted_price ?? null,
@@ -625,9 +637,10 @@ async function refreshAccuracy() {
 }
 
 // ── R² scores ──────────────────────────────────────────────────────────
-async function refreshR2() {
+async function refreshR2(symbol) {
+  const sym = symbol || S.symbol;
   try {
-    const data = await (await fetch(`/api/r2_scores?session_id=${S.sessionId}`)).json();
+    const data = await (await fetch(`/api/r2_scores?session_id=${S.sessionId}&symbol=${sym}`)).json();
     console.log('[QuantAgent] R² scores:', JSON.stringify(data, null, 2));
     const fmt = v => v != null ? Number(v).toFixed(4) : '—';
     document.getElementById('r2-ols').textContent = fmt(data.r2_ols);

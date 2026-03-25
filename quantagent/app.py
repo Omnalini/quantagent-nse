@@ -134,7 +134,9 @@ def llm_status():
 def r2_scores():
     """Return R² scores comparing OLS vs LLM price predictions to actuals."""
     session_id = request.args.get("session_id", "default")
-    history = price_trackers.get(session_id, {}).get("history", [])
+    symbol     = request.args.get("symbol", DEFAULT_SYMBOL).upper()
+    r2_key     = f"{session_id}:{symbol}"
+    history    = price_trackers.get(r2_key, {}).get("history", [])
 
     def _r2(actuals, preds):
         if len(actuals) < 2:
@@ -193,9 +195,10 @@ def analyze():
     if "error" in result:
         return jsonify(result), 400
 
-    # R² price-prediction tracking
+    # R² price-prediction tracking (keyed per session+symbol to avoid cross-stock contamination)
+    r2_key = f"{session_id}:{symbol}"
     curr_price = float(df['close'].iloc[-1])
-    pt = price_trackers.setdefault(session_id, {"history": [], "pending": None})
+    pt = price_trackers.setdefault(r2_key, {"history": [], "pending": None})
     if pt["pending"]:
         pt["pending"]["actual"] = curr_price
         pt["history"].append(pt["pending"])
@@ -209,6 +212,13 @@ def analyze():
     if session_id not in trackers:
         trackers[session_id] = AccuracyTracker()
     tracker = trackers[session_id]
+
+    # Live validation: use recent bars to validate the previous prediction (same symbol)
+    prev = session_meta.get(session_id, {})
+    if prev.get("last_pred_id") and prev.get("symbol") == symbol:
+        for i in range(max(len(df) - 3, 0), len(df)):
+            tracker.add_validation_bar(prev["last_pred_id"], df.iloc[i].to_dict())
+
     pred_id = str(uuid.uuid4())[:8]
     tracker.record_prediction(
         prediction_id=pred_id,
@@ -221,7 +231,8 @@ def analyze():
 
     session_meta[session_id] = {
         "symbol": symbol, "interval": interval,
-        "prediction_count": session_meta.get(session_id, {}).get("prediction_count", 0) + 1
+        "last_pred_id": pred_id,
+        "prediction_count": session_meta.get(session_id, {}).get("prediction_count", 0) + 1,
     }
 
     result["prediction_id"] = pred_id

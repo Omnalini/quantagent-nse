@@ -236,6 +236,7 @@ class LLMClient:
                 config=_gtypes.GenerateContentConfig(
                     max_output_tokens=1024,
                     temperature=0.2,
+                    response_mime_type="application/json",
                 ),
             )
             raw = self._safe_gem_text(resp)

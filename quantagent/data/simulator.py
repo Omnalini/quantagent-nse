@@ -271,9 +271,11 @@ class AccuracyTracker:
         """Get overall accuracy statistics"""
         if not self.results:
             return {
-                "total_predictions": 0,
+                "total_predictions": len(self.predictions),
+                "total": len(self.predictions),
                 "validated": 0,
                 "accuracy": 0.0,
+                "accuracy_pct": 0.0,
                 "avg_rcc": 0.0,
                 "avg_rmax": 0.0,
                 "avg_rmin": 0.0,

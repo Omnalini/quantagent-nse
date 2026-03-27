@@ -281,6 +281,10 @@ button:disabled{opacity:.45;cursor:not-allowed}
           <div style="font-size:12px;font-weight:600" id="llm-pat-name"></div>
           <div style="font-size:11px;color:var(--muted);margin-top:3px" id="llm-pat-struct"></div>
         </div>
+        <!-- Pattern chart -->
+        <div id="pat-chart-wrap" hidden style="margin-top:10px">
+          <img id="pat-chart-img" style="width:100%;border-radius:6px;display:block" alt="Pattern chart"/>
+        </div>
       </div>
 
       <!-- Trend -->
@@ -308,6 +312,10 @@ button:disabled{opacity:.45;cursor:not-allowed}
           <div style="font-size:10px;color:var(--accent);margin-bottom:4px">✦ LLM Analysis:</div>
           <div style="font-size:12px;font-weight:600;margin-bottom:3px" id="llm-tre-signal"></div>
           <div style="font-size:11px;color:var(--muted);line-height:1.5" id="llm-tre-narrative"></div>
+        </div>
+        <!-- Trend chart -->
+        <div id="tre-chart-wrap" hidden style="margin-top:10px">
+          <img id="tre-chart-img" style="width:100%;border-radius:6px;display:block" alt="Trend chart"/>
         </div>
       </div>
 
@@ -664,6 +672,21 @@ function renderResult(d) {
     document.getElementById('llm-tre-narrative').textContent = tre.llm_narrative;
   } else {
     document.getElementById('llm-tre-block').hidden = true;
+  }
+
+  // Pattern + Trend charts
+  const charts = d.charts || {};
+  if (charts.pattern) {
+    document.getElementById('pat-chart-img').src = 'data:image/png;base64,' + charts.pattern;
+    document.getElementById('pat-chart-wrap').hidden = false;
+  } else {
+    document.getElementById('pat-chart-wrap').hidden = true;
+  }
+  if (charts.trend) {
+    document.getElementById('tre-chart-img').src = 'data:image/png;base64,' + charts.trend;
+    document.getElementById('tre-chart-wrap').hidden = false;
+  } else {
+    document.getElementById('tre-chart-wrap').hidden = true;
   }
 
   // Risk

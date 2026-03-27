@@ -192,6 +192,16 @@ def analyze():
     if "error" in result:
         return jsonify(result), 400
 
+    # Generate pattern + trend charts (base64 PNG)
+    try:
+        charts = generate_all_charts(df, result)
+        result["charts"] = {
+            "pattern": charts.get("pattern"),
+            "trend":   charts.get("trend"),
+        }
+    except Exception:
+        result["charts"] = {"pattern": None, "trend": None}
+
     # R² price-prediction tracking (keyed per session+symbol to avoid cross-stock contamination)
     r2_key = f"{session_id}:{symbol}"
     curr_price = float(df['close'].iloc[-1])

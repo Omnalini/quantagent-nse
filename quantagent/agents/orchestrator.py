@@ -223,6 +223,11 @@ class QuantAgent:
                 "confidence":       round(decision.confidence, 3),
                 "signal_alignment": decision.signal_alignment,
                 "llm_watch_for":    llm_decision.get("watch_for", ""),
+                # New richer LLM fields
+                "llm_trade_type":        llm_pattern.get("trade_type", ""),
+                "llm_entry_zone":        llm_pattern.get("entry_zone", ""),
+                "llm_key_levels":        llm_pattern.get("key_levels", ""),
+                "llm_signal_confluence": llm_pattern.get("signal_confluence"),
             },
 
             "indicators": {
@@ -246,11 +251,12 @@ class QuantAgent:
                 "trend_summary":     pat.trend_summary,
                 "symmetry_summary":  pat.symmetry_summary,
                 "pivot_points":      pat.pivot_points,
-                # LLM enrichment (empty dict if LLM unavailable)
-                "llm_confirmed":  llm_pattern.get("confirmed_pattern", ""),
-                "llm_structure":  llm_pattern.get("structure", ""),
-                "llm_trend":      llm_pattern.get("trend_context", ""),
-                "llm_symmetry":   llm_pattern.get("symmetry", ""),
+                # LLM enrichment
+                "llm_confirmed":      llm_pattern.get("confirmed_pattern", ""),
+                "llm_structure":      llm_pattern.get("structure", ""),
+                "llm_trend":          llm_pattern.get("trend_context", ""),
+                "llm_symmetry":       llm_pattern.get("symmetry", ""),
+                "llm_target_price":   llm_pattern.get("pattern_target_price"),
             },
 
             "trend": {

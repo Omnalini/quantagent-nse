@@ -13,11 +13,10 @@ load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file_
 import json
 import time
 import uuid
-import threading
 import numpy as np
 import pandas as pd
 from datetime import datetime
-from flask import Flask, jsonify, request, render_template, Response, session
+from flask import Flask, jsonify, request, render_template, session
 from flask_cors import CORS
 
 from agents import QuantAgent
@@ -271,15 +270,19 @@ def quote():
 
     try:
         df = fetch_ohlc_cached(symbol, interval, period)
+        if len(df) == 0:
+            return jsonify({"error": f"No price data for {symbol} — may be delisted or unavailable"}), 400
         last = df.tail(n)
+        # Ensure timestamp column exists
+        cols = [c for c in ["open","high","low","close","volume","timestamp"] if c in last.columns]
         return jsonify({
             "symbol": symbol,
-            "bars": last[["open","high","low","close","volume","timestamp"]].to_dict("records"),
+            "bars": last[cols].to_dict("records"),
             "latest_price": float(df["close"].iloc[-1]),
             "bar_count": len(df),
         })
     except Exception as exc:
-        return jsonify({"error": str(exc)}), 500
+        return jsonify({"error": f"Quote fetch failed for {symbol}: {exc}"}), 400
 
 
 @app.route('/api/accuracy', methods=['GET'])
@@ -289,56 +292,6 @@ def get_accuracy():
         return jsonify({"total": 0, "validated": 0, "accuracy_pct": 0.0}), 200
     return jsonify(trackers[session_id].get_summary())
 
-
-@app.route('/api/stream', methods=['GET'])
-def stream():
-    """
-    SSE stream: push price ticks every 30 s from yfinance (1m bars).
-    LLM analysis is NOT triggered here to conserve API credits.
-    Auto-analysis (rule-based only) fires every 10 ticks.
-    """
-    symbol     = request.args.get("symbol", DEFAULT_SYMBOL).upper()
-    interval   = request.args.get("interval", DEFAULT_INTERVAL)
-    session_id = request.args.get("session_id", "default")
-
-    def generate():
-        agent = QuantAgent(timeframe=interval)
-        tick = 0
-        while True:
-            try:
-                df = fetch_ohlc_cached(symbol, "1m", "1d")
-                latest = df.iloc[-1]
-                event = {
-                    "type": "tick",
-                    "symbol": symbol,
-                    "price": float(latest["close"]),
-                    "open": float(latest["open"]),
-                    "high": float(latest["high"]),
-                    "low": float(latest["low"]),
-                    "volume": float(latest.get("volume", 0)),
-                    "timestamp": float(latest.get("timestamp", time.time())),
-                    "market_open": is_market_open(),
-                }
-
-                tick += 1
-                if tick % 10 == 0:
-                    full_df = fetch_ohlc_cached(symbol, interval, "5d")
-                    if len(full_df) >= 30:
-                        analysis = agent.run(full_df)
-                        if "decision" in analysis:
-                            event["type"]     = "analysis"
-                            event["analysis"] = analysis
-
-                yield f"data: {json.dumps(event)}\n\n"
-                time.sleep(30)
-            except GeneratorExit:
-                break
-            except Exception as exc:
-                yield f"data: {json.dumps({'type':'error','message':str(exc)})}\n\n"
-                time.sleep(30)
-
-    return Response(generate(), mimetype='text/event-stream',
-                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 @app.route('/api/backtest', methods=['POST'])

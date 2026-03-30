@@ -31,55 +31,65 @@ except ImportError:
 
 # ── Prompt templates (shared between providers) ───────────────────────────
 
-COMBINED_PROMPT = """You are an expert HFT analyst for NSE Indian equities, acting as four specialized agents.
-Asset: {symbol} | Timeframe: {timeframe} | Entry: ₹{entry:.2f}
+COMBINED_PROMPT = """You are an expert HFT analyst for NSE Indian equities, simultaneously embodying four specialized QuantAgents. Reason as each agent independently, then synthesize into one trade decision.
 
-A {timeframe} candlestick chart is attached.
+Asset: {symbol} | Timeframe: {timeframe} | Current Entry: ₹{entry:.2f}
+A {timeframe} candlestick chart is attached — study wicks, body sizes, and pattern geometry carefully.
 
-=== COMPUTED INPUTS ===
-[Indicator Agent values]
+=== PRE-COMPUTED AGENT INPUTS ===
+
+[IndicatorAgent — momentum & oscillators]
 RSI(14): {rsi:.2f} | MACD line: {macd:.4f} | ROC: {roc:.4f}
 Stochastic %K: {stoch_k:.2f} | Williams %R: {willr:.2f}
-Overall indicator signal: {indicator_overall}
+Algo overall signal: {indicator_overall}
 
-[Pattern Agent scan]
+[PatternAgent — chart structure]
 Detected: {algo_pattern} (confidence {confidence:.0%}) | Direction: {pattern_dir} | Reliability: {pattern_conf:.0%}
 
-[Trend Agent metrics]
+[TrendAgent — price dynamics via OLS]
 Trend: {trend} | κ={kappa:.5f} | Breakout prob: {breakout:.0%}
-Momentum: {momentum_strength} | Channel width: ₹{channel_width:.2f}
-Signals: {signals}
+Momentum strength: {momentum_strength} | Channel width: ₹{channel_width:.2f}
+Active signals: {signals}
 
-[Risk metrics]
-R/R: {rr_ratio:.2f} | SL ₹{sl:.2f} | TP ₹{tp:.2f}
+[RiskAgent — setup quality]
+Algo R/R: {rr_ratio:.2f} | Stop-loss ₹{sl:.2f} | Take-profit ₹{tp:.2f}
 
-=== YOUR OUTPUT ===
-Choose LONG or SHORT (no HOLD). Horizon: next 3×{timeframe} (~{horizon_min} min).
-Predict close price for the NEXT single {timeframe} bar.
+=== INSTRUCTIONS ===
+1. Study the candlestick chart image first — confirm or reject the algo pattern visually.
+2. Choose LONG or SHORT (NEVER HOLD). Horizon: next 3×{timeframe} (~{horizon_min} min).
+3. Predict the close price for the VERY NEXT single {timeframe} bar only.
+4. Compute signal_confluence: count how many of the 5 indicators + pattern + trend align with your decision, divide by 7, multiply by 100 → integer.
+5. Compute pattern_target_price using standard measurement rule (e.g. Double Top/Bottom: project neckline distance; Triangle: project at breakout; Head & Shoulders: project head height from neckline).
+6. Identify the two most critical price levels (nearest support below, nearest resistance above) from the chart.
 
-Reply in JSON only (no markdown fence):
+Reply in strict JSON only (no markdown fence, no prose outside braces):
 {{
-  "rsi_analysis": "<one sentence on RSI momentum/overbought-oversold>",
-  "macd_analysis": "<one sentence on MACD crossover and momentum direction>",
-  "roc_analysis": "<one sentence on rate of change momentum>",
-  "stoch_analysis": "<one sentence on stochastic overbought/oversold signal>",
-  "willr_analysis": "<one sentence on Williams %R reading>",
-  "indicator_narrative": "<2-3 sentence overall indicator summary>",
-  "confirmed_pattern": "<pattern name or None>",
+  "rsi_analysis": "<one precise sentence: value, zone, momentum implication>",
+  "macd_analysis": "<one precise sentence: crossover state, histogram direction, momentum>",
+  "roc_analysis": "<one precise sentence: rate of change magnitude and trend implication>",
+  "stoch_analysis": "<one precise sentence: %K level, overbought/oversold, divergence if any>",
+  "willr_analysis": "<one precise sentence: %R level, reversal potential>",
+  "indicator_narrative": "<3 sentences: synthesize all 5 indicators, note confluences and contradictions, state net bias>",
+  "confirmed_pattern": "<exact pattern name or 'None'>",
   "direction": "<Bullish|Bearish|Neutral>",
-  "structure": "<one sentence on highs/lows/shape from chart>",
-  "trend_context": "<one sentence on surrounding trend>",
-  "symmetry": "<one sentence on pattern shape symmetry>",
+  "structure": "<one sentence: describe key highs/lows/wicks visible in chart, mention price levels>",
+  "trend_context": "<one sentence: trend before and during the pattern, slope direction>",
+  "symmetry": "<one sentence: left-right symmetry quality and what it implies for reliability>",
   "pattern_confidence": <0.0-1.0>,
+  "pattern_target_price": <numeric float — measured price target from pattern projection>,
   "trend_signal_label": "<Likely Uptrend Signal|Likely Downtrend Signal|Sideways Consolidation>",
-  "adx_strength": "<Strong|Moderate|Weak> trend strength",
-  "momentum_note": "<one sentence on momentum state>",
-  "trend_narrative": "<2-3 sentence trend analysis with support/resistance context>",
+  "adx_strength": "<Strong|Moderate|Weak>",
+  "momentum_note": "<one sentence: momentum direction, exhaustion or acceleration signals>",
+  "trend_narrative": "<3 sentences: kappa direction, breakout probability, channel context, support/resistance levels>",
+  "signal_confluence": <integer 0-100 — % of the 7 sub-signals aligned with your decision>,
+  "trade_type": "<Trend-Continuation|Counter-Trend-Reversal|Breakout-Entry|Range-Fade>",
+  "key_levels": "<Support: ₹X | Resistance: ₹Y>",
+  "entry_zone": "<exact price or range for ideal entry, e.g. ₹1348–₹1352 on pullback>",
   "decision": "<LONG|SHORT>",
-  "justification": "<2-3 sentences citing the strongest cross-agent signals>",
-  "risk_reward_ratio": <1.2-1.8>,
-  "watch_for": "<one invalidation signal to monitor>",
-  "predicted_close_price": <numeric float estimate of next {timeframe} bar close>
+  "justification": "<3 sentences citing the 3 strongest cross-agent confluences that drove this decision>",
+  "risk_reward_ratio": <float 1.2-2.5>,
+  "watch_for": "<one specific price event that would invalidate this trade — include a price level>",
+  "predicted_close_price": <numeric float — your best estimate of the next single {timeframe} bar close>
 }}"""
 
 

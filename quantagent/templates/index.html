@@ -859,6 +859,56 @@ function renderResult(d) {
     briefCard.hidden = true;
   }
 
+  // Console output for explanation / debugging
+  const preds2c = d.predictions || {};
+  const ind2c   = d.indicators  || {};
+  const pat2c   = d.pattern     || {};
+  const tre2c   = d.trend       || {};
+  const dec2c   = d.decision    || {};
+  console.log('[QuantAgent] LLM response data:', JSON.stringify({
+    provider: d.llm_provider,
+    llm_errors: d.llm_errors || null,
+    indicator_agent: {
+      overall_signal:  ind2c.overall,
+      llm_narrative:   ind2c.llm_narrative   || null,
+      rsi_analysis:    ind2c.rsi?.llm_analysis   || null,
+      macd_analysis:   ind2c.macd?.llm_analysis  || null,
+      roc_analysis:    ind2c.roc?.llm_analysis   || null,
+      stoch_analysis:  ind2c.stoch?.llm_analysis || null,
+      willr_analysis:  ind2c.willr?.llm_analysis || null,
+    },
+    pattern_agent: {
+      algo_pattern:    pat2c.name,
+      llm_confirmed:   pat2c.llm_confirmed  || null,
+      llm_structure:   pat2c.llm_structure  || null,
+      llm_trend:       pat2c.llm_trend      || null,
+      llm_symmetry:    pat2c.llm_symmetry   || null,
+      llm_target_price: pat2c.llm_target_price ?? null,
+    },
+    trend_agent: {
+      classification:    tre2c.classification,
+      llm_signal_label:  tre2c.llm_signal_label  || null,
+      llm_adx_strength:  tre2c.llm_adx_strength  || null,
+      llm_momentum_note: tre2c.llm_momentum_note || null,
+      llm_narrative:     tre2c.llm_narrative      || null,
+    },
+    decision_agent: {
+      direction:           dec2c.direction,
+      signal_confluence:   dec2c.llm_signal_confluence ?? null,
+      trade_type:          dec2c.llm_trade_type   || null,
+      key_levels:          dec2c.llm_key_levels   || null,
+      entry_zone:          dec2c.llm_entry_zone   || null,
+      justification:       dec2c.justification    || null,
+      watch_for:           dec2c.llm_watch_for    || null,
+      risk_reward_ratio:   dec2c.risk_reward_ratio ?? null,
+    },
+    predictions: {
+      current_price:       preds2c.current_price       ?? null,
+      ols_predicted_price: preds2c.ols_predicted_price ?? null,
+      llm_predicted_price: preds2c.llm_predicted_price ?? null,
+    },
+  }, null, 2));
+
   pushChart(d.ohlc, d.symbol);
 }
 

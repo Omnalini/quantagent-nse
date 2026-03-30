@@ -207,12 +207,17 @@ def analyze():
     curr_price = float(df['close'].iloc[-1])
     pt = price_trackers.setdefault(r2_key, {"history": [], "pending": None})
     if pt["pending"]:
-        pt["pending"]["actual"] = curr_price
-        pt["history"].append(pt["pending"])
+        # Only validate the previous prediction when genuinely NEW bars have arrived.
+        # If the dataset length hasn't grown (market closed, cached data), the "actual"
+        # would be the same bar the prediction was made on — useless for R² evaluation.
+        if len(df) > pt["pending"].get("df_len", 0):
+            pt["pending"]["actual"] = curr_price
+            pt["history"].append(pt["pending"])
     preds = result.get("predictions", {})
     pt["pending"] = {
-        "ols": preds.get("ols_predicted_price"),
-        "llm": preds.get("llm_predicted_price"),
+        "ols":    preds.get("ols_predicted_price"),
+        "llm":    preds.get("llm_predicted_price"),
+        "df_len": len(df),   # snapshot; next call checks if bar count grew
     }
 
     # Accuracy tracking
@@ -220,10 +225,12 @@ def analyze():
         trackers[session_id] = AccuracyTracker()
     tracker = trackers[session_id]
 
-    # Live validation: use recent bars to validate the previous prediction (same symbol)
+    # Live validation: validate previous prediction against bars that arrived AFTER it was made
     prev = session_meta.get(session_id, {})
     if prev.get("last_pred_id") and prev.get("symbol") == symbol:
-        for i in range(max(len(df) - 3, 0), len(df)):
+        prev_len = prev.get("df_len", 0)
+        # Only feed bars that are strictly newer than when the prediction was recorded
+        for i in range(prev_len, min(prev_len + 3, len(df))):
             tracker.add_validation_bar(prev["last_pred_id"], df.iloc[i].to_dict())
 
     pred_id = str(uuid.uuid4())[:8]
@@ -239,6 +246,7 @@ def analyze():
     session_meta[session_id] = {
         "symbol": symbol, "interval": interval,
         "last_pred_id": pred_id,
+        "df_len": len(df),  # snapshot of dataset length at prediction time
         "prediction_count": session_meta.get(session_id, {}).get("prediction_count", 0) + 1,
     }
 
@@ -362,7 +370,7 @@ def backtest():
 
     for i in range(50, len(df), analysis_every):
         window   = df.iloc[:i]
-        analysis = agent.run(window)
+        analysis = agent.run(window, require_llm=False)
         if "decision" not in analysis:
             continue
 

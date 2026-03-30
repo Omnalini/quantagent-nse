@@ -173,10 +173,13 @@ button:disabled{opacity:.45;cursor:not-allowed}
       </div>
     </div>
 
-    <!-- LLM status (key loaded from .env server-side) -->
+    <!-- API Key entry -->
     <div class="card">
-      <div class="card-title">LLM Status</div>
-      <div id="llm-detail" style="font-size:11px;color:var(--muted)">Checking…</div>
+      <div class="card-title">API Key <span style="color:var(--red);font-size:9px">REQUIRED</span></div>
+      <div style="font-size:10px;color:var(--muted);margin-bottom:6px">Gemini (AIza…) or Claude (sk-ant-…)</div>
+      <input type="password" id="api-key-input" placeholder="Paste your API key…" autocomplete="off"/>
+      <button style="margin-top:6px" onclick="saveApiKey()">Save Key</button>
+      <div id="llm-detail" style="font-size:11px;color:var(--muted);margin-top:8px">No key set.</div>
     </div>
 
     <!-- Price widget -->
@@ -196,12 +199,13 @@ button:disabled{opacity:.45;cursor:not-allowed}
 
     <!-- Accuracy -->
     <div class="card">
-      <div class="card-title">Session Accuracy</div>
+      <div class="card-title">Session Accuracy <span style="color:var(--muted);font-size:9px;text-transform:none;letter-spacing:0">(needs 3 future bars to validate)</span></div>
       <div class="acc-grid">
         <div class="acc-cell"><div class="val bull" id="acc-pct">—</div><div class="lbl">Accuracy</div></div>
-        <div class="acc-cell"><div class="val" id="acc-total">0</div><div class="lbl">Calls</div></div>
-        <div class="acc-cell"><div class="val" id="acc-rcc">—</div><div class="lbl">Avg Rcc</div></div>
+        <div class="acc-cell"><div class="val" id="acc-validated">0</div><div class="lbl">Validated</div></div>
+        <div class="acc-cell"><div class="val" id="acc-total">0</div><div class="lbl">Total Calls</div></div>
       </div>
+      <div style="font-size:10px;color:var(--muted);margin-top:6px" id="acc-note">Accuracy updates only when new market bars arrive after a prediction.</div>
     </div>
 
   </aside>
@@ -348,7 +352,7 @@ button:disabled{opacity:.45;cursor:not-allowed}
 
     <!-- Prediction R² comparison -->
     <div class="card">
-      <div class="card-title">Prediction R² — OLS vs LLM <span style="color:var(--muted);font-size:10px">(higher = better · run Backtest to populate OLS)</span></div>
+      <div class="card-title">Prediction R² — OLS vs LLM <span style="color:var(--muted);font-size:10px">(OLS: run Backtest · LLM: requires live market bars)</span></div>
       <div class="agent-grid" style="grid-template-columns:1fr 1fr 1fr 1fr;margin-bottom:8px">
         <div class="acc-cell">
           <div class="val" id="r2-ols">—</div>
@@ -435,6 +439,33 @@ const S = {
   setInterval(refreshPrice, 60_000);
   setStatus('Ready.');
 })();
+
+// ── API key save ───────────────────────────────────────────────────────
+async function saveApiKey() {
+  const key = document.getElementById('api-key-input').value.trim();
+  if (!key) { setStatus('Please paste an API key first.'); return; }
+  const detail = document.getElementById('llm-detail');
+  detail.textContent = 'Saving…';
+  detail.style.color = 'var(--muted)';
+  try {
+    const res  = await fetch('/api/set_api_key', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ api_key: key }),
+    });
+    const data = await res.json();
+    if (data.error) {
+      detail.textContent = data.error;
+      detail.style.color = 'var(--red)';
+      return;
+    }
+    document.getElementById('api-key-input').value = '';
+    setStatus('API key saved. Verifying connection…');
+    await checkLLMStatus();
+  } catch (e) {
+    detail.textContent = 'Save failed: ' + e.message;
+    detail.style.color = 'var(--red)';
+  }
+}
 
 // ── LLM status check ───────────────────────────────────────────────────
 async function checkLLMStatus() {
@@ -568,7 +599,18 @@ async function runAnalysis() {
       }),
     });
     const data = await res.json();
-    if (data.error) { setStatus('Error: ' + data.error); return; }
+    if (data.error) {
+      if (data.error === 'no_api_key') {
+        setStatus('⚠ No API key set. Paste a Gemini (AIza…) or Claude (sk-ant-…) key in the sidebar and click Save Key.');
+        document.getElementById('d-horizon').textContent = 'API key required';
+        document.getElementById('d-justify').textContent = data.message || 'Enter your API key in the sidebar to run analysis.';
+        document.getElementById('dir-badge').textContent = '—';
+        document.getElementById('decision-banner').className = 'card';
+      } else {
+        setStatus('Error: ' + data.error);
+      }
+      return;
+    }
     renderResult(data);
     refreshAccuracy();
     const llmErrors = data.llm_errors || {};
@@ -766,10 +808,20 @@ function renderResult(d) {
 // ── Accuracy ───────────────────────────────────────────────────────────
 async function refreshAccuracy() {
   const data = await (await fetch(`/api/accuracy?session_id=${S.sessionId}`)).json();
-  const pct = data.accuracy_pct ?? data.accuracy;
-  document.getElementById('acc-pct').textContent   = pct != null ? Number(pct).toFixed(1)+'%' : '—';
-  document.getElementById('acc-total').textContent = data.total ?? data.total_predictions ?? 0;
-  document.getElementById('acc-rcc').textContent   = data.avg_rcc != null ? Number(data.avg_rcc).toFixed(4) : '—';
+  const validated = data.validated ?? 0;
+  const total     = data.total ?? data.total_predictions ?? 0;
+  const pct       = data.accuracy_pct ?? data.accuracy;
+  // Accuracy % is only meaningful once at least 3 predictions have been validated
+  const pctTxt = validated >= 1 ? Number(pct).toFixed(1)+'%' : '—';
+  document.getElementById('acc-pct').textContent       = pctTxt;
+  document.getElementById('acc-validated').textContent = validated;
+  document.getElementById('acc-total').textContent     = total;
+  // Note: accuracy only updates after 3 new market bars close after a prediction
+  const note = document.getElementById('acc-note');
+  if (validated === 0 && total > 0)
+    note.textContent = 'Waiting for 3 new bars to close after each prediction (market must be open).';
+  else if (validated > 0)
+    note.textContent = `${validated} of ${total} predictions validated against 3 future bars.`;
 }
 
 // ── R² scores ──────────────────────────────────────────────────────────
@@ -811,7 +863,7 @@ function renderR2Panel(recent) {
     interp.textContent = `${better} by ${Math.abs(diff)} R² points — LLM explained ${(S.r2.llmVal*100).toFixed(1)}% of price variance vs ${(S.r2.olsVal*100).toFixed(1)}% for straight-line regression.`;
     interp.style.color = S.r2.llmVal > S.r2.olsVal ? 'var(--green)' : 'var(--yellow)';
   } else if (S.r2.olsVal != null) {
-    interp.textContent = `OLS R² from backtest: ${fmt(S.r2.olsVal)} (${S.r2.olsN} samples). Run Analyse Now a few times to get LLM R².`;
+    interp.textContent = `OLS R² from backtest: ${fmt(S.r2.olsVal)} (${S.r2.olsN} samples). LLM R² accumulates only when the market is open and new bars close after each prediction.`;
     interp.style.color = 'var(--muted)';
   } else if (recent) {
     const r = (recent || []).slice(-1)[0];
@@ -884,14 +936,15 @@ function logStreamSignal(analysis) {
 async function runBacktest() {
   S.symbol   = document.getElementById('symbol-sel').value;
   S.interval = document.getElementById('tf-sel').value;
+  S.period   = document.getElementById('period-sel').value;
   const btn  = document.querySelector('button.secondary[onclick="runBacktest()"]');
   if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Running…'; }
-  setStatus('Running backtest on 5-day history (rule-based, no LLM)…');
+  setStatus(`Running backtest on ${S.period} of ${S.interval} data (rule-based, no LLM)…`);
 
   try {
     const res  = await fetch('/api/backtest', {
       method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ symbol: S.symbol, interval: S.interval, period: '5d', analysis_every: 3 }),
+      body: JSON.stringify({ symbol: S.symbol, interval: S.interval, period: S.period, analysis_every: 3 }),
     });
     const d = await res.json();
     if (d.error) { setStatus('Backtest error: ' + d.error); return; }

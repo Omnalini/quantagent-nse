@@ -291,7 +291,7 @@ class IndicatorAgent:
         # Aggregate signal
         signals = [rsi_sig.signal, macd_sig.signal, roc_sig.signal,
                    stoch_sig.signal, willr_sig.signal]
-        bull_count = signals.count("Bullish")
+        bull_count = signals.count("Bullish") 
         bear_count = signals.count("Bearish")
 
         if bull_count >= 3:

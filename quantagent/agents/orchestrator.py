@@ -58,15 +58,25 @@ class QuantAgent:
 
     # ── Public entry point ────────────────────────────────────────────────
 
-    def run(self, ohlc_df: pd.DataFrame) -> Dict[str, Any]:
+    def run(self, ohlc_df: pd.DataFrame, require_llm: bool = True) -> Dict[str, Any]:
         """
         Run all agents on the supplied OHLC DataFrame and return a
         fully-serializable result dict.
 
         Minimum required: 30 bars.
+        require_llm: If True (default), returns an error when no API key is set.
+                     Pass False for backtest/offline use — algorithmic signals only.
         """
         if len(ohlc_df) < 30:
             return {"error": "Insufficient data (need ≥30 bars)"}
+
+        if require_llm and not self.llm.available:
+            return {
+                "error": "no_api_key",
+                "llm_required": True,
+                "message": "An API key is required to run analysis. "
+                           "Enter a Gemini key (AIza…) or Claude key (sk-ant-…) in the sidebar.",
+            }
 
         t0 = time.time()
 

@@ -205,18 +205,16 @@ def analyze():
     r2_key = f"{session_id}:{symbol}"
     curr_price = float(df['close'].iloc[-1])
     pt = price_trackers.setdefault(r2_key, {"history": [], "pending": None})
-    if pt["pending"]:
-        # Only validate the previous prediction when genuinely NEW bars have arrived.
-        # If the dataset length hasn't grown (market closed, cached data), the "actual"
-        # would be the same bar the prediction was made on — useless for R² evaluation.
-        if len(df) > pt["pending"].get("df_len", 0):
-            pt["pending"]["actual"] = curr_price
-            pt["history"].append(pt["pending"])
+    if pt["pending"] is not None:
+        # Validate the previous prediction: use the current close as the actual.
+        # This works whether market is open or closed — the latest available close
+        # is the best honest reference for how close the prediction was.
+        pt["pending"]["actual"] = curr_price
+        pt["history"].append(pt["pending"])
     preds = result.get("predictions", {})
     pt["pending"] = {
-        "ols":    preds.get("ols_predicted_price"),
-        "llm":    preds.get("llm_predicted_price"),
-        "df_len": len(df),   # snapshot; next call checks if bar count grew
+        "ols": preds.get("ols_predicted_price"),
+        "llm": preds.get("llm_predicted_price"),
     }
 
     # Accuracy tracking

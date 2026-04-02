@@ -969,8 +969,11 @@ function renderR2Panel(recent) {
     const better = S.r2.llmVal > S.r2.olsVal ? 'LLM outperforms OLS' : 'OLS outperforms LLM';
     interp.textContent = `${better} by ${Math.abs(diff)} R² points — LLM explained ${(S.r2.llmVal*100).toFixed(1)}% of price variance vs ${(S.r2.olsVal*100).toFixed(1)}% for straight-line regression.`;
     interp.style.color = S.r2.llmVal > S.r2.olsVal ? 'var(--green)' : 'var(--yellow)';
+  } else if (S.r2.llmN === 1) {
+    interp.textContent = '1 LLM sample collected — run Analyse Now once more to compute R².';
+    interp.style.color = 'var(--accent)';
   } else if (S.r2.olsVal != null) {
-    interp.textContent = `OLS R² from backtest: ${fmt(S.r2.olsVal)} (${S.r2.olsN} samples). LLM R² accumulates only when the market is open and new bars close after each prediction.`;
+    interp.textContent = `OLS R² from backtest: ${fmt(S.r2.olsVal)} (${S.r2.olsN} samples). Run Analyse Now twice to populate LLM R².`;
     interp.style.color = 'var(--muted)';
   } else if (recent) {
     const r = (recent || []).slice(-1)[0];

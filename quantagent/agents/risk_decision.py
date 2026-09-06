@@ -143,9 +143,14 @@ class RiskAgent:
     - Produces radar chart of 6 dimensions
     """
 
-    def __init__(self):
+    def __init__(self, rho: float = STOP_LOSS_RHO):
+        """
+        rho: fractional stop-loss distance from entry. Defaults to the paper's
+        0.0005 (0.05%), which is what every published result in this repo was
+        produced with — override it only for experiments.
+        """
         self.name = "RiskAgent"
-        self.rho = STOP_LOSS_RHO
+        self.rho = rho
 
     def analyze(self, ohlc_df: pd.DataFrame,
                 indicator_report: IndicatorReport,
@@ -349,10 +354,13 @@ class DecisionAgent:
     def _build_trade_setup(self, direction: str, entry: float,
                             risk: RiskAssessment) -> str:
         """Build trade setup with entry, stop-loss, take-profit"""
+        # Derived from the levels themselves so the label stays correct if a
+        # RiskAgent is constructed with a non-default rho.
+        sl_pct = abs(entry - risk.stop_loss) / entry * 100 if entry else 0.0
         return (
             f"Direction: {direction} | "
             f"Entry: {entry:.4f} | "
-            f"Stop-Loss: {risk.stop_loss:.4f} ({STOP_LOSS_RHO*100:.2f}% from entry) | "
+            f"Stop-Loss: {risk.stop_loss:.4f} ({sl_pct:.2f}% from entry) | "
             f"Take-Profit: {risk.take_profit:.4f} "
             f"(R:R = 1:{risk.risk_reward_ratio:.2f}) | "
             f"Risk Zone: {risk.risk_zone_width:.4f} | "

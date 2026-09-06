@@ -3,43 +3,57 @@ QuantAgent Flask Backend — Nifty 50 Edition
 Real market data via yfinance + optional Claude LLM enhancement.
 """
 
-import sys
 import os
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import threading
+from pathlib import Path
 
 from dotenv import load_dotenv
-load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env'))
 
-import json
+# .env lives at the repo root, one level above this package.
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+
 import time
 import uuid
 import numpy as np
 import pandas as pd
-from datetime import datetime
 from flask import Flask, jsonify, request, render_template, session
 from flask_cors import CORS
 
-from agents import QuantAgent
-from data.nifty_fetcher import (
+from .agents import QuantAgent
+from .data.nifty_fetcher import (
     fetch_ohlc_cached, get_nifty_50_list, is_market_open, NIFTY_50
 )
-from data.simulator import AccuracyTracker
-from charts import generate_all_charts
+from .data.simulator import AccuracyTracker
+from .charts import generate_all_charts
 
 app = Flask(__name__)
-app.secret_key = os.urandom(24)
+# A fresh key every restart would silently invalidate every existing session,
+# so read it from the environment and fall back to a random dev-only value.
+app.secret_key = os.environ.get("SECRET_KEY") or os.urandom(24)
 CORS(app)
 app.config['JSON_SORT_KEYS'] = False
 
 # ── Global session state ──────────────────────────────────────────────────
+# These dicts are module-level and mutated from several request threads at once
+# (app.run(threaded=True) gives every request its own thread). The R² bookkeeping
+# in particular is a read-modify-write on `pending`: two concurrent /api/analyze
+# calls for one session could interleave between reading the pending prediction
+# and replacing it, scoring the same prediction twice or losing one entirely.
+# _state_lock serialises every access to all three dicts.
+_state_lock = threading.Lock()
+
 trackers: dict = {}
 session_meta: dict = {}
-# R² price prediction tracking: session_id -> {"history": [...], "pending": {...}}
+# R² price prediction tracking:
+#   f"{session_id}:{symbol}" -> {"history": [...], "pending": {...}, "scored_bars": [...]}
 price_trackers: dict = {}
 
 DEFAULT_SYMBOL    = "RELIANCE"
 DEFAULT_INTERVAL  = "15m"
 DEFAULT_PERIOD    = "5d"
+
+# R² on a handful of points is noise, not a result. Report nothing below this.
+MIN_R2_SAMPLES = 30
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────
@@ -61,6 +75,14 @@ def _get_api_key(request_data: dict) -> str | None:
             or request.headers.get("X-Api-Key")
             or session.get("api_key")
             or os.environ.get("GEMINI_API_KEY"))
+
+
+def _last_bar_key(df: pd.DataFrame) -> str:
+    """Stable identity for the most recent bar, used to de-duplicate predictions."""
+    for col in ("timestamp", "datetime"):
+        if col in df.columns:
+            return str(df[col].iloc[-1])
+    return str(len(df))
 
 
 def _fetch_df(symbol: str, interval: str, period: str) -> pd.DataFrame:
@@ -116,17 +138,32 @@ def set_api_key():
 
 @app.route('/api/llm_status', methods=['GET'])
 def llm_status():
-    """Ping the LLM to confirm connectivity. Returns JSON with ok/error details."""
-    from agents.llm_client import LLMClient
+    """
+    Ping the LLM to confirm connectivity.
+
+    Always reports exactly one of three states so the UI can never claim success
+    on a failed call:
+      llm_off   — no key configured
+      llm_error — a key is set but the call failed (reason in "error")
+      llm_ok    — the round-trip succeeded
+    """
+    from .agents.llm_client import LLMClient
     api_key = session.get("api_key") or os.environ.get("GEMINI_API_KEY")
     if not api_key:
-        return jsonify({"llm_available": False, "status": "no_key", "provider": None})
+        return jsonify({"llm_available": False, "llm_state": "llm_off",
+                        "status": "no_key", "provider": None,
+                        "error": "No API key configured."})
     client = LLMClient(api_key=api_key)
     if not client.available:
-        return jsonify({"llm_available": False, "status": "import_error", "provider": client.provider})
+        return jsonify({
+            "llm_available": False, "llm_state": "llm_error",
+            "status": "import_error", "provider": client.provider,
+            "error": f"SDK for provider '{client.provider}' is not installed.",
+        })
     result = client.ping()
     return jsonify({
         "llm_available": result["ok"],
+        "llm_state": "llm_ok" if result["ok"] else "llm_error",
         "status": "ok" if result["ok"] else "error",
         "provider": result.get("provider"),
         "reply": result.get("reply"),
@@ -140,19 +177,37 @@ def r2_scores():
     session_id = request.args.get("session_id", "default")
     symbol     = request.args.get("symbol", DEFAULT_SYMBOL).upper()
     r2_key     = f"{session_id}:{symbol}"
-    history    = price_trackers.get(r2_key, {}).get("history", [])
+    with _state_lock:
+        history = list(price_trackers.get(r2_key, {}).get("history", []))
 
     ols_pairs = [(h["actual"], h["ols"]) for h in history if h.get("ols") is not None]
     llm_pairs = [(h["actual"], h["llm"]) for h in history if h.get("llm") is not None]
 
-    return jsonify({
+    payload = {
+        "symbol":      symbol,
         "n_samples":   len(history),
-        "r2_ols":      _r2([p[0] for p in ols_pairs], [p[1] for p in ols_pairs]),
-        "r2_llm":      _r2([p[0] for p in llm_pairs], [p[1] for p in llm_pairs]),
         "n_ols":       len(ols_pairs),
         "n_llm":       len(llm_pairs),
+        "min_samples": MIN_R2_SAMPLES,
         "recent":      history[-5:],
+    }
+
+    # A negative R² computed from three points is not a result — it is noise
+    # presented as a measurement. Withhold the number until the sample is real.
+    if len(history) < MIN_R2_SAMPLES:
+        payload.update({
+            "r2_ols": None,
+            "r2_llm": None,
+            "reason": "insufficient_samples",
+        })
+        return jsonify(payload)
+
+    payload.update({
+        "r2_ols": _r2([p[0] for p in ols_pairs], [p[1] for p in ols_pairs]),
+        "r2_llm": _r2([p[0] for p in llm_pairs], [p[1] for p in llm_pairs]),
+        "reason": None,
     })
+    return jsonify(payload)
 
 
 @app.route('/api/analyze', methods=['POST'])
@@ -201,59 +256,96 @@ def analyze():
     except Exception:
         result["charts"] = {"pattern": None, "trend": None}
 
-    # R² price-prediction tracking (keyed per session+symbol to avoid cross-stock contamination)
-    r2_key = f"{session_id}:{symbol}"
+    # ── R² price-prediction tracking ──────────────────────────────────────
+    # Keyed per session+symbol, and the pending record additionally carries the
+    # symbol and the bar it was made against. Two invariants follow:
+    #   1. A prediction is only ever scored against the price of the instrument
+    #      it was made for — never another symbol's price.
+    #   2. A prediction is scored at most once, and only after a genuinely newer
+    #      bar has closed. Re-analysing the same bar no longer appends a
+    #      duplicate row with an unchanged actual.
+    r2_key     = f"{session_id}:{symbol}"
     curr_price = float(df['close'].iloc[-1])
-    pt = price_trackers.setdefault(r2_key, {"history": [], "pending": None})
-    if pt["pending"] is not None:
-        # Validate the previous prediction: use the current close as the actual.
-        # This works whether market is open or closed — the latest available close
-        # is the best honest reference for how close the prediction was.
-        pt["pending"]["actual"] = curr_price
-        pt["history"].append(pt["pending"])
-    preds = result.get("predictions", {})
-    pt["pending"] = {
-        "ols": preds.get("ols_predicted_price"),
-        "llm": preds.get("llm_predicted_price"),
-    }
+    bar_key    = _last_bar_key(df)
+    preds      = result.get("predictions", {})
+    pred_id    = str(uuid.uuid4())[:8]
 
-    # Accuracy tracking
-    if session_id not in trackers:
-        trackers[session_id] = AccuracyTracker()
-    tracker = trackers[session_id]
+    with _state_lock:
+        pt = price_trackers.setdefault(
+            r2_key, {"history": [], "pending": None, "scored_bars": []}
+        )
+        pending = pt["pending"]
+        if pending is not None:
+            same_symbol  = pending.get("symbol") == symbol
+            new_bar      = pending.get("bar_key") != bar_key
+            already_done = pending.get("bar_key") in pt["scored_bars"]
+            if not same_symbol:
+                pt["pending"] = None          # belongs to another instrument — drop it
+            elif new_bar and not already_done:
+                pending["actual"]         = curr_price
+                pending["actual_bar_key"] = bar_key
+                pt["history"].append(pending)
+                pt["scored_bars"].append(pending["bar_key"])
+            # else: same bar, nothing new has closed — keep waiting, record nothing
 
-    # Live validation: validate previous prediction against bars that arrived AFTER it was made
-    prev = session_meta.get(session_id, {})
-    if prev.get("last_pred_id") and prev.get("symbol") == symbol:
-        prev_len = prev.get("df_len", 0)
-        # Only feed bars that are strictly newer than when the prediction was recorded
-        for i in range(prev_len, min(prev_len + 3, len(df))):
-            tracker.add_validation_bar(prev["last_pred_id"], df.iloc[i].to_dict())
+        pt["pending"] = {
+            "symbol":  symbol,
+            "bar_key": bar_key,
+            "ols":     preds.get("ols_predicted_price"),
+            "llm":     preds.get("llm_predicted_price"),
+        }
 
-    pred_id = str(uuid.uuid4())[:8]
-    tracker.record_prediction(
-        prediction_id=pred_id,
-        direction=result['decision']['direction'],
-        entry_price=result['decision']['entry_price'],
-        stop_loss=result['decision']['stop_loss'],
-        take_profit=result['decision']['take_profit'],
-        timestamp=time.time()
-    )
+        # Accuracy tracking
+        if session_id not in trackers:
+            trackers[session_id] = AccuracyTracker()
+        tracker = trackers[session_id]
 
-    session_meta[session_id] = {
-        "symbol": symbol, "interval": interval,
-        "last_pred_id": pred_id,
-        "df_len": len(df),  # snapshot of dataset length at prediction time
-        "prediction_count": session_meta.get(session_id, {}).get("prediction_count", 0) + 1,
-    }
+        # Live validation: only feed bars that arrived AFTER the prediction was made
+        prev = session_meta.get(session_id, {})
+        if prev.get("last_pred_id") and prev.get("symbol") == symbol:
+            prev_len = prev.get("df_len", 0)
+            for i in range(prev_len, min(prev_len + 3, len(df))):
+                tracker.add_validation_bar(prev["last_pred_id"], df.iloc[i].to_dict())
 
+        tracker.record_prediction(
+            prediction_id=pred_id,
+            direction=result['decision']['direction'],
+            entry_price=result['decision']['entry_price'],
+            stop_loss=result['decision']['stop_loss'],
+            take_profit=result['decision']['take_profit'],
+            timestamp=time.time()
+        )
+
+        session_meta[session_id] = {
+            "symbol": symbol, "interval": interval,
+            "last_pred_id": pred_id,
+            "df_len": len(df),  # snapshot of dataset length at prediction time
+            "prediction_count": session_meta.get(session_id, {}).get("prediction_count", 0) + 1,
+        }
+
+    # Echo the resolved request back so the frontend can discard any response
+    # that no longer matches what the user has selected (see 0.1).
     result["prediction_id"] = pred_id
     result["session_id"]    = session_id
     result["symbol"]        = symbol
+    result["interval"]      = interval
+    result["period"]        = period
     result["llm_enabled"]   = bool(api_key)
     result["llm_provider"]  = ("gemini" if api_key and api_key.startswith("AIza")
                                else "anthropic" if api_key else None)
     result["market_open"]   = is_market_open()
+
+    # One of llm_off / llm_error / llm_ok — the badge must never claim success
+    # when the call failed or came back empty.
+    llm_errs = result.get("llm_errors") or {}
+    llm_err  = llm_errs.get("decision") or llm_errs.get("pattern")
+    if not api_key:
+        result["llm_state"] = "llm_off"
+    elif llm_err:
+        result["llm_state"] = "llm_error"
+    else:
+        result["llm_state"] = "llm_ok"
+    result["llm_error"] = llm_err or None
 
     return jsonify(result)
 
@@ -275,6 +367,8 @@ def quote():
         cols = [c for c in ["open","high","low","close","volume","timestamp"] if c in last.columns]
         return jsonify({
             "symbol": symbol,
+            "interval": interval,
+            "period": period,
             "bars": last[cols].to_dict("records"),
             "latest_price": float(df["close"].iloc[-1]),
             "bar_count": len(df),
@@ -286,9 +380,11 @@ def quote():
 @app.route('/api/accuracy', methods=['GET'])
 def get_accuracy():
     session_id = request.args.get("session_id", "default")
-    if session_id not in trackers:
-        return jsonify({"total": 0, "validated": 0, "accuracy_pct": 0.0}), 200
-    return jsonify(trackers[session_id].get_summary())
+    with _state_lock:
+        tracker = trackers.get(session_id)
+        if tracker is None:
+            return jsonify({"total": 0, "validated": 0, "accuracy_pct": 0.0}), 200
+        return jsonify(tracker.get_summary())
 
 
 
@@ -417,7 +513,4 @@ def backtest():
         "backtest_summary": tracker.get_summary(),
     })
 
-
-if __name__ == '__main__':
-    print("QuantAgent Nifty 50 — starting on http://localhost:5000")
-    app.run(debug=True, host='0.0.0.0', port=3000, threaded=True)
+# The entry point lives in run.py at the repo root: `python run.py`.

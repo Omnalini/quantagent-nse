@@ -19,9 +19,6 @@ from .trend import TrendAgent
 from .risk_decision import RiskAgent, DecisionAgent, TradeDecision
 from .llm_client import LLMClient
 
-# NSE-specific stop-loss (0.1 % vs paper's 0.05 % for liquid US markets)
-NSE_STOP_LOSS_PCT = 0.001
-
 
 class QuantAgent:
     """
@@ -140,14 +137,26 @@ class QuantAgent:
                 )
                 if "error" in llm_combined:
                     llm_error = llm_combined.pop("error", "")
-                elif "decision" in llm_combined:
-                    direction = llm_combined["decision"].upper()
+                elif not llm_combined.get("decision"):
+                    # Call succeeded but every structured field came back empty —
+                    # report it rather than letting the UI show a silent success.
+                    llm_error = "LLM response contained no 'decision' field"
+                    llm_combined = {}
+                else:
+                    direction = str(llm_combined["decision"]).upper()
                     if direction in ("LONG", "SHORT"):
                         decision.direction = direction
                     if "justification" in llm_combined:
                         decision.justification = llm_combined["justification"]
                     if "risk_reward_ratio" in llm_combined:
                         decision.risk_reward_ratio = float(llm_combined["risk_reward_ratio"])
+                    # RiskAgent sized the bracket for the direction IT chose. If
+                    # the LLM overturned that direction (or the R:R), the stop and
+                    # target must be re-derived, or a SHORT setup renders with a
+                    # LONG bracket — stop below entry, target above it.
+                    if (decision.direction != risk_assessment.direction
+                            or decision.risk_reward_ratio != risk_assessment.risk_reward_ratio):
+                        self._reprice_brackets(decision, risk_assessment)
             except Exception as e:
                 llm_combined = {}
                 llm_error = str(e)
@@ -161,7 +170,43 @@ class QuantAgent:
         return self._serialize(
             decision, indicator_report, pattern_match, trend_report,
             risk_assessment, ohlc_df, elapsed, llm_pattern, llm_decision,
-            ols_predicted_price, llm_error, ""
+            ols_predicted_price, "", llm_error
+        )
+
+    # ── Bracket repricing ─────────────────────────────────────────────────
+
+    def _reprice_brackets(self, decision: TradeDecision, risk) -> None:
+        """
+        Recompute stop-loss and take-profit for the decision's final direction.
+
+        Uses exactly RiskAgent's formula — stop at rho from entry, target at
+        r x rho — so a decision the LLM leaves alone is unchanged. Both the
+        decision and the risk assessment are updated together, so the two panes
+        of the UI can never disagree about the same trade.
+        """
+        rho   = self.risk_agent.rho
+        entry = decision.entry_price
+        rr    = decision.risk_reward_ratio
+
+        if decision.direction == "LONG":
+            stop_loss   = entry * (1 - rho)
+            take_profit = entry * (1 + rr * rho)
+        else:
+            stop_loss   = entry * (1 + rho)
+            take_profit = entry * (1 - rr * rho)
+
+        decision.stop_loss   = stop_loss
+        decision.take_profit = take_profit
+
+        risk.direction         = decision.direction
+        risk.stop_loss         = stop_loss
+        risk.take_profit       = take_profit
+        risk.risk_reward_ratio = rr
+        risk.risk_zone_width   = abs(entry - stop_loss)
+        risk.reward_zone_width = abs(take_profit - entry)
+
+        decision.trade_setup = self.decision_agent._build_trade_setup(
+            decision.direction, entry, risk
         )
 
     # ── Serialization ─────────────────────────────────────────────────────

@@ -3,18 +3,32 @@ LLM Client for QuantAgent — supports Anthropic Claude and Google Gemini.
 
 Provider detection:
   - key starts with "sk-ant-"  → Anthropic Claude (claude-haiku-4-5-20251001)
-  - key starts with "AIza"     → Google Gemini   (gemini-2.0-flash, free tier)
+  - key starts with "AIza"     → Google Gemini   (gemini-2.5-flash, free tier)
 
 Token-saving strategies:
   - Cheapest model per provider (haiku / flash)
-  - max_tokens capped at 512 (pattern) and 768 (decision)
   - LLM skipped entirely when no key is set
+
+Failure handling: both providers can return no usable text — Gemini yields None
+on a safety block or a MAX_TOKENS truncation, Anthropic can return an empty
+content list. Neither is exceptional, so every text access is guarded and the
+raw body is logged whenever JSON parsing fails.
 """
 
 from __future__ import annotations
 import base64
 import json
+import logging
 from typing import Optional
+
+log = logging.getLogger(__name__)
+
+ANTHROPIC_MODEL = "claude-haiku-4-5-20251001"
+GEMINI_MODEL    = "gemini-2.5-flash"
+
+# The combined prompt asks for ~20 JSON fields. A cap that truncates the response
+# mid-object yields unparseable JSON and silently empties every downstream field.
+MAX_OUTPUT_TOKENS = 4096
 
 try:
     import anthropic as _ant
@@ -174,9 +188,11 @@ class LLMClient:
         internal reasoning (no JSON) instead of the actual output.
         We iterate parts directly and skip thought parts to get the real output.
         """
+        if resp is None:
+            return ""
         # Iterate parts first — explicitly skip thought parts
         try:
-            parts = resp.candidates[0].content.parts
+            parts = resp.candidates[0].content.parts or []
             for part in reversed(parts):
                 text = getattr(part, 'text', None)
                 is_thought = getattr(part, 'thought', False)
@@ -184,13 +200,34 @@ class LLMClient:
                     return text.strip()
         except Exception:
             pass
-        # Fallback: SDK resp.text (may include thinking content on some SDK versions)
+        # Fallback: SDK resp.text — None on safety blocks and MAX_TOKENS truncation
         try:
-            if resp.text:
-                return resp.text.strip()
+            text = resp.text
+            if text:
+                return text.strip()
         except Exception:
             pass
         return ""
+
+    @staticmethod
+    def _safe_ant_text(resp) -> str:
+        """Extract output text from an Anthropic response without ever raising."""
+        try:
+            for block in resp.content or []:
+                text = getattr(block, "text", None)
+                if text:
+                    return text.strip()
+        except Exception:
+            pass
+        return ""
+
+    @staticmethod
+    def _gem_finish_reason(resp) -> str:
+        """Best-effort finish reason, used to explain an empty Gemini response."""
+        try:
+            return str(resp.candidates[0].finish_reason)
+        except Exception:
+            return "unknown"
 
     def _extract_json(self, raw: str) -> dict:
         """
@@ -206,7 +243,9 @@ class LLMClient:
             try:
                 return json.loads(raw[start:end])
             except json.JSONDecodeError as e:
-                return {"error": f"JSON parse failed: {e}", "preview": raw[start:start+300]}
+                log.warning("LLM JSON parse failed (%s). Raw body:\n%s", e, raw)
+                return {"error": f"JSON parse failed: {e}", "preview": raw[start:start + 300]}
+        log.warning("LLM returned no JSON object. Raw body:\n%s", raw)
         return {"error": "No JSON object in response", "preview": raw[:300]}
 
     def ping(self) -> dict:
@@ -214,22 +253,28 @@ class LLMClient:
         if self._gem:
             try:
                 resp = self._gem.models.generate_content(
-                    model="gemini-2.5-flash",
+                    model=GEMINI_MODEL,
                     contents="Reply with the single word: ok",
                     config=_gtypes.GenerateContentConfig(max_output_tokens=64, temperature=0),
                 )
                 text = self._safe_gem_text(resp)
-                return {"ok": True, "provider": "gemini", "reply": text or "(empty response)"}
+                if not text:
+                    return {"ok": False, "provider": "gemini",
+                            "error": f"Empty response (finish_reason={self._gem_finish_reason(resp)})"}
+                return {"ok": True, "provider": "gemini", "reply": text}
             except Exception as e:
                 return {"ok": False, "provider": "gemini", "error": str(e)}
         if self._ant:
             try:
                 resp = self._ant.messages.create(
-                    model="claude-haiku-4-5-20251001",
+                    model=ANTHROPIC_MODEL,
                     max_tokens=10,
                     messages=[{"role": "user", "content": "Reply with the single word: ok"}],
                 )
-                return {"ok": True, "provider": "anthropic", "reply": resp.content[0].text.strip()}
+                text = self._safe_ant_text(resp)
+                if not text:
+                    return {"ok": False, "provider": "anthropic", "error": "Empty response"}
+                return {"ok": True, "provider": "anthropic", "reply": text}
             except Exception as e:
                 return {"ok": False, "provider": "anthropic", "error": str(e)}
         return {"ok": False, "provider": "none", "error": "No API client initialized"}
@@ -240,62 +285,83 @@ class LLMClient:
         b64 = base64.standard_b64encode(png).decode()
         try:
             resp = self._ant.messages.create(
-                model="claude-haiku-4-5-20251001",
-                max_tokens=2048,
+                model=ANTHROPIC_MODEL,
+                max_tokens=MAX_OUTPUT_TOKENS,
                 messages=[{"role": "user", "content": [
                     {"type": "image",
                      "source": {"type": "base64", "media_type": "image/png", "data": b64}},
                     {"type": "text", "text": prompt},
                 ]}],
             )
-            return self._extract_json(resp.content[0].text.strip())
+            raw = self._safe_ant_text(resp)
+            if not raw:
+                stop = getattr(resp, "stop_reason", "unknown")
+                return {"error": f"Empty response from Claude (stop_reason={stop})"}
+            return self._extract_json(raw)
         except Exception as e:
             return {"error": str(e)}
 
     def _ant_text(self, prompt: str) -> dict:
         try:
             resp = self._ant.messages.create(
-                model="claude-haiku-4-5-20251001",
-                max_tokens=2048,
+                model=ANTHROPIC_MODEL,
+                max_tokens=MAX_OUTPUT_TOKENS,
                 messages=[{"role": "user", "content": prompt}],
             )
-            return self._extract_json(resp.content[0].text.strip())
+            raw = self._safe_ant_text(resp)
+            if not raw:
+                stop = getattr(resp, "stop_reason", "unknown")
+                return {"error": f"Empty response from Claude (stop_reason={stop})"}
+            return self._extract_json(raw)
         except Exception as e:
             return {"error": str(e)}
 
     # ── Gemini backend ────────────────────────────────────────────────────
 
+    def _gem_config(self) -> "_gtypes.GenerateContentConfig":
+        """Shared generation config: JSON output, no thinking budget, generous cap."""
+        cfg = {
+            "max_output_tokens": MAX_OUTPUT_TOKENS,
+            "temperature": 0.2,
+            # Ask the API itself for JSON rather than relying on the prompt —
+            # this removes markdown fences and stray prose as a failure mode.
+            "response_mime_type": "application/json",
+        }
+        try:
+            cfg["thinking_config"] = _gtypes.ThinkingConfig(thinking_budget=0)
+        except Exception:
+            pass  # older SDK without ThinkingConfig
+        return _gtypes.GenerateContentConfig(**cfg)
+
     def _gem_vision(self, png: bytes, prompt: str) -> dict:
         try:
             img_part = _gtypes.Part.from_bytes(data=png, mime_type="image/png")
-            cfg = {"max_output_tokens": 2048, "temperature": 0.2}
-            try:
-                cfg["thinking_config"] = _gtypes.ThinkingConfig(thinking_budget=0)
-            except Exception:
-                pass  # older SDK without ThinkingConfig
             resp = self._gem.models.generate_content(
-                model="gemini-2.5-flash",
+                model=GEMINI_MODEL,
                 contents=[img_part, prompt],
-                config=_gtypes.GenerateContentConfig(**cfg),
+                config=self._gem_config(),
             )
             raw = self._safe_gem_text(resp)
+            if not raw:
+                reason = self._gem_finish_reason(resp)
+                log.warning("Gemini returned no text (finish_reason=%s)", reason)
+                return {"error": f"Empty response from Gemini (finish_reason={reason})"}
             return self._extract_json(raw)
         except Exception as e:
             return {"error": str(e)}
 
     def _gem_text(self, prompt: str) -> dict:
         try:
-            cfg = {"max_output_tokens": 768, "temperature": 0.2}
-            try:
-                cfg["thinking_config"] = _gtypes.ThinkingConfig(thinking_budget=0)
-            except Exception:
-                pass
             resp = self._gem.models.generate_content(
-                model="gemini-2.5-flash",
+                model=GEMINI_MODEL,
                 contents=prompt,
-                config=_gtypes.GenerateContentConfig(**cfg),
+                config=self._gem_config(),
             )
             raw = self._safe_gem_text(resp)
+            if not raw:
+                reason = self._gem_finish_reason(resp)
+                log.warning("Gemini returned no text (finish_reason=%s)", reason)
+                return {"error": f"Empty response from Gemini (finish_reason={reason})"}
             return self._extract_json(raw)
         except Exception as e:
             return {"error": str(e)}

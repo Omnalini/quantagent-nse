@@ -458,12 +458,57 @@ const S = {
   chart: null,
   equityChart: null,
   // R² values: OLS comes from backtest, LLM from live analyze
-  r2: { olsVal: null, olsN: 0, llmVal: null, llmN: 0 },
+  r2: { olsVal: null, olsN: 0, llmVal: null, llmN: 0, nSamples: 0, minSamples: 30 },
+  // Request guards — see selectionKey() below
+  selKey: null,
+  aborts: { analysis: null, price: null, r2: null },
 };
+
+// ── Request guards ─────────────────────────────────────────────────────
+// Two panes of this page must never show two different instruments. Every read
+// is tagged with the selection it was issued for; a response is dropped if the
+// selection has changed since, or if the payload's own symbol disagrees. Any
+// change to symbol/interval/period also aborts whatever is still in flight, so
+// a slow response can no longer land after a fast one and repaint stale data.
+function selectionKey() {
+  const sym = document.getElementById('symbol-sel').value || S.symbol;
+  const tf  = document.getElementById('tf-sel').value || S.interval;
+  return `${sym}|${tf}|${S.period}`;
+}
+
+function beginRequest(kind) {
+  if (S.aborts[kind]) S.aborts[kind].abort();
+  S.aborts[kind] = new AbortController();
+  S.selKey = selectionKey();
+  return { signal: S.aborts[kind].signal, key: S.selKey };
+}
+
+function isStale(key, payloadSymbol, expectedSymbol) {
+  if (key !== selectionKey()) return true;
+  if (payloadSymbol && expectedSymbol &&
+      String(payloadSymbol).toUpperCase() !== String(expectedSymbol).toUpperCase()) return true;
+  return false;
+}
+
+function onSelectionChanged() {
+  S.symbol   = document.getElementById('symbol-sel').value;
+  S.interval = document.getElementById('tf-sel').value;
+  S.selKey   = selectionKey();
+  // Abort anything still in flight for the previous selection.
+  Object.keys(S.aborts).forEach(k => { if (S.aborts[k]) S.aborts[k].abort(); });
+  // Blank the panes that are now showing another instrument.
+  document.getElementById('price-big').textContent  = '—';
+  document.getElementById('price-time').textContent = 'loading…';
+  document.getElementById('chart-sym').textContent  = S.symbol;
+  S.r2 = { olsVal: null, olsN: 0, llmVal: null, llmN: 0, nSamples: 0, minSamples: S.r2.minSamples };
+  renderR2Panel();
+  refreshPrice();
+}
 
 // ── Boot ───────────────────────────────────────────────────────────────
 (async function init() {
   await loadStocks();
+  S.selKey = selectionKey();
   buildChart();
   checkMarket();
   checkLLMStatus();
@@ -499,42 +544,54 @@ async function saveApiKey() {
   }
 }
 
-// ── LLM status check ───────────────────────────────────────────────────
-async function checkLLMStatus() {
-  const badge = document.getElementById('llm-status');
+// ── LLM status ─────────────────────────────────────────────────────────
+// The badge renders exactly one of three server-reported states. It shows ✓
+// only for llm_ok — never for a call that failed or came back empty.
+function applyLLMState(state, provider, error, reply) {
+  const badge  = document.getElementById('llm-status');
   const detail = document.getElementById('llm-detail');
-  badge.textContent = 'LLM: checking…';
+  const label  = provider === 'gemini' ? 'Gemini 2.5-flash'
+               : provider === 'anthropic' ? 'Claude Haiku 4.5' : 'LLM';
+
+  if (state === 'llm_ok') {
+    badge.textContent = `LLM: ${label} ✓`;
+    badge.classList.remove('llm-off');
+    detail.textContent = `Connected · ${label}` + (reply ? ` · reply: "${reply}"` : '');
+    detail.style.color = 'var(--green)';
+  } else if (state === 'llm_error') {
+    badge.textContent = 'LLM: Error ✕';
+    badge.classList.add('llm-off');
+    detail.textContent = error || 'The LLM call failed.';
+    detail.style.color = 'var(--red)';
+    console.warn('[QuantAgent] LLM error:', error);
+  } else {                                    // llm_off
+    badge.textContent = 'LLM: No Key';
+    badge.classList.add('llm-off');
+    detail.textContent = error || 'No key set.';
+    detail.style.color = 'var(--muted)';
+  }
+}
+
+async function checkLLMStatus() {
+  document.getElementById('llm-status').textContent = 'LLM: checking…';
   try {
     const data = await (await fetch('/api/llm_status')).json();
     console.log('[QuantAgent] LLM status:', JSON.stringify(data, null, 2));
-    if (data.llm_available) {
-      const label = data.provider === 'gemini' ? 'Gemini 2.5-flash' : 'Claude';
-      badge.textContent = `LLM: ${label} ✓`;
-      badge.classList.remove('llm-off');
-      detail.textContent = `Connected · ${label} · reply: "${data.reply}"`;
-      detail.style.color = 'var(--green)';
-    } else {
-      badge.textContent = 'LLM: ' + (data.status === 'no_key' ? 'No Key' : 'Error');
-      badge.classList.add('llm-off');
-      detail.textContent = data.error || data.status;
-      detail.style.color = 'var(--red)';
-      console.warn('[QuantAgent] LLM unavailable:', data.error || data.status);
-    }
+    applyLLMState(data.llm_state, data.provider, data.error, data.reply);
   } catch (e) {
-    badge.textContent = 'LLM: Error';
-    badge.classList.add('llm-off');
-    detail.textContent = e.message;
-    detail.style.color = 'var(--red)';
-    console.error('[QuantAgent] LLM status check failed:', e.message);
+    applyLLMState('llm_error', null, 'Status check failed: ' + e.message);
   }
 }
 
 // ── Live price (always 1m, ignores analysis timeframe/period) ──────────
 async function refreshPrice() {
   const sym = document.getElementById('symbol-sel').value || S.symbol;
+  const { signal, key } = beginRequest('price');
   try {
-    const res  = await fetch(`/api/quote?symbol=${sym}&interval=1m&period=1d&n=1`);
+    const res  = await fetch(`/api/quote?symbol=${sym}&interval=1m&period=1d&n=1`, { signal });
     const data = await res.json();
+    // Drop a late response for a symbol the user has already navigated away from.
+    if (isStale(key, data.symbol, sym)) return;
     if (data.latest_price) {
       document.getElementById('price-big').textContent =
         '₹' + Number(data.latest_price).toLocaleString('en-IN', {maximumFractionDigits:2});
@@ -544,7 +601,8 @@ async function refreshPrice() {
       document.getElementById('price-big').textContent = '—';
       document.getElementById('price-time').textContent = 'No data';
     }
-  } catch (_) {
+  } catch (e) {
+    if (e.name === 'AbortError') return;
     document.getElementById('price-big').textContent = '—';
   }
 }
@@ -561,7 +619,8 @@ async function loadStocks() {
     if (s.symbol === S.symbol) opt.selected = true;
     sel.appendChild(opt);
   });
-  sel.addEventListener('change', () => { S.symbol = sel.value; refreshPrice(); });
+  sel.addEventListener('change', onSelectionChanged);
+  document.getElementById('tf-sel').addEventListener('change', onSelectionChanged);
 }
 
 // ── Market status ──────────────────────────────────────────────────────
@@ -627,6 +686,9 @@ async function runAnalysis() {
   btn.innerHTML = '<span class="spinner"></span> Analysing…';
   setStatus('Fetching ' + S.symbol + ' data and running agents…');
 
+  const requested = S.symbol;
+  const { signal, key } = beginRequest('analysis');
+
   try {
     const res = await fetch('/api/analyze', {
       method: 'POST', headers: {'Content-Type':'application/json'},
@@ -634,8 +696,14 @@ async function runAnalysis() {
         symbol: S.symbol, interval: S.interval,
         period: S.period, session_id: S.sessionId,
       }),
+      signal,
     });
     const data = await res.json();
+    // Never render another instrument's analysis into the current view.
+    if (isStale(key, data.symbol, requested)) {
+      setStatus('Discarded a stale response for ' + (data.symbol || requested) + '.');
+      return;
+    }
     if (data.error) {
       if (data.error === 'no_api_key') {
         setStatus('⚠ No API key set. Paste a Gemini (AIza…) or Claude (sk-ant-…) key in the sidebar and click Save Key.');
@@ -650,12 +718,17 @@ async function runAnalysis() {
     }
     renderResult(data);
     refreshAccuracy();
-    const llmErrors = data.llm_errors || {};
-    const errMsg = llmErrors.decision || llmErrors.pattern || '';
-    setStatus(`Done in ${data.elapsed_ms} ms · LLM: ${data.llm_enabled ? 'ON ✦' : 'OFF'}${errMsg ? ' · LLM err: ' + errMsg.slice(0, 60) : ''}`);
+    // Three states, no optimism: the badge follows llm_state, never llm_enabled.
+    const errMsg = data.llm_error || '';
+    applyLLMState(data.llm_state, data.llm_provider, errMsg);
+    const stateLabel = data.llm_state === 'llm_ok' ? 'ON ✦'
+                     : data.llm_state === 'llm_error' ? 'ERROR ✕' : 'OFF';
+    setStatus(`Done in ${data.elapsed_ms} ms · LLM: ${stateLabel}` +
+              (errMsg ? ' · ' + errMsg.slice(0, 80) : ''));
     if (errMsg) console.error('[QuantAgent] LLM error:', errMsg);
-    refreshR2(S.symbol);
+    refreshR2(requested);
   } catch (e) {
+    if (e.name === 'AbortError') { setStatus('Cancelled — selection changed.'); return; }
     setStatus('Request failed: ' + e.message);
   } finally {
     btn.disabled = false;
@@ -940,19 +1013,29 @@ function updateR2FromBacktest(r2Ols, nSamples) {
   renderR2Panel();
 }
 
+// Backtest results belong to whichever symbol the backtest actually ran on.
+
 async function refreshR2(symbol) {
   const sym = symbol || S.symbol;
+  const { signal, key } = beginRequest('r2');
   try {
-    const data = await (await fetch(`/api/r2_scores?session_id=${S.sessionId}&symbol=${sym}`)).json();
-    S.r2.llmVal = data.r2_llm;
-    S.r2.llmN   = data.n_llm ?? 0;
+    const data = await (await fetch(
+      `/api/r2_scores?session_id=${S.sessionId}&symbol=${sym}`, { signal })).json();
+    if (isStale(key, data.symbol, sym)) return;
+    S.r2.llmVal     = data.r2_llm;
+    S.r2.llmN       = data.n_llm ?? 0;
+    S.r2.nSamples   = data.n_samples ?? 0;
+    S.r2.minSamples = data.min_samples ?? 30;
+    S.r2.collecting = data.reason === 'insufficient_samples';
     // Also update OLS from live tracker if we have enough samples and no backtest yet
     if (!S.r2.olsVal && data.r2_ols != null) {
       S.r2.olsVal = data.r2_ols;
       S.r2.olsN   = data.n_ols ?? 0;
     }
     renderR2Panel(data.recent);
-  } catch (_) {}
+  } catch (e) {
+    if (e.name !== 'AbortError') console.warn('[QuantAgent] R² refresh failed:', e.message);
+  }
 }
 
 function renderR2Panel(recent) {
@@ -962,8 +1045,24 @@ function renderR2Panel(recent) {
   document.getElementById('r2-llm').textContent   = fmt(S.r2.llmVal);
   document.getElementById('r2-llm-n').textContent = S.r2.llmN;
 
-  // Interpretation
   const interp = document.getElementById('r2-interp');
+
+  // Below the sample floor the server withholds the number. Say so plainly —
+  // an R² of −0.50 from three points is noise dressed up as a measurement.
+  if (S.r2.collecting) {
+    const n   = S.r2.nSamples ?? 0;
+    const min = S.r2.minSamples ?? 30;
+    const bt  = S.r2.olsVal != null
+      ? ` Backtest OLS R²: ${fmt(S.r2.olsVal)} (${S.r2.olsN} samples).`
+      : ' Run Quick Backtest for the OLS figure.';
+    interp.textContent =
+      `Collecting samples (${n}/${min}) — the live R² is withheld until enough ` +
+      `predictions have been scored to mean anything.` + bt;
+    interp.style.color = 'var(--muted)';
+    return;
+  }
+
+  // Interpretation
   if (S.r2.olsVal != null && S.r2.llmVal != null) {
     const diff = (S.r2.llmVal - S.r2.olsVal).toFixed(4);
     const better = S.r2.llmVal > S.r2.olsVal ? 'LLM outperforms OLS' : 'OLS outperforms LLM';
@@ -992,25 +1091,6 @@ function renderR2Panel(recent) {
 // ── (streaming removed) ────────────────────────────────────────────────
 // Stream functionality removed to keep analysis LLM-focused.
 
-function _unused_logStreamSignal(analysis) {
-  const dec  = analysis.decision;
-  const body = null;
-  const time = new Date().toLocaleTimeString('en-IN', {hour:'2-digit', minute:'2-digit'});
-  const dir  = dec.direction;
-  const cls  = dir === 'LONG' ? 'bull' : 'bear';
-  const fmt  = v => v != null ? '₹' + Number(v).toLocaleString('en-IN', {maximumFractionDigits:2}) : '—';
-  const row  = document.createElement('tr');
-  row.innerHTML = `
-    <td>${time}</td>
-    <td>${analysis.symbol || S.symbol}</td>
-    <td><span class="${cls}">${dir}</span></td>
-    <td>${fmt(dec.entry_price)}</td>
-    <td class="bull">${fmt(dec.take_profit)}</td>
-    <td class="bear">${fmt(dec.stop_loss)}</td>
-    <td>${(dec.confidence * 100).toFixed(0)}%</td>`;
-  body.prepend(row);  // newest on top
-}
-
 // ── Backtest ───────────────────────────────────────────────────────────
 async function runBacktest() {
   S.symbol   = document.getElementById('symbol-sel').value;
@@ -1021,12 +1101,18 @@ async function runBacktest() {
   setStatus(`Running backtest on 5d of ${S.interval} data (rule-based, no LLM)…`);
 
   try {
+    const requested = S.symbol;
     const res  = await fetch('/api/backtest', {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({ symbol: S.symbol, interval: S.interval, period: S.period, analysis_every: 3 }),
     });
     const d = await res.json();
     if (d.error) { setStatus('Backtest error: ' + d.error); return; }
+    // The backtest card names its own symbol; refuse to fill it from another's run.
+    if (d.symbol && String(d.symbol).toUpperCase() !== String(requested).toUpperCase()) {
+      setStatus('Discarded a stale backtest response for ' + d.symbol + '.');
+      return;
+    }
 
     // Update R² panel with OLS backtest results
     updateR2FromBacktest(d.r2_ols, d.n_ols_samples);

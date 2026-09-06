@@ -76,9 +76,6 @@ NSE_OPEN_MIN = 15
 NSE_CLOSE_HOUR = 15
 NSE_CLOSE_MIN = 30
 
-# ── Stop-loss for Indian stocks: 0.1% (paper uses 0.05% for US liquid) ──
-NSE_STOP_LOSS_PCT = 0.001
-
 
 def get_yf_ticker(symbol: str) -> str:
     """Convert bare NSE symbol to yfinance ticker (append .NS)."""

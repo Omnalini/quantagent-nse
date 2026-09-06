@@ -13,7 +13,7 @@ High-Frequency Trading** — Xiong et al., [arXiv:2509.09995v3](https://arxiv.or
 The multi-agent decomposition, the fixed-ρ stop-loss design, the R = r·ρ take-profit rule, the
 six-dimension risk radar and the LONG/SHORT-without-HOLD output are the paper's.
 
-Built on top of that by this team:
+Added on top of the paper here:
 
 - **NSE / Nifty 50 adaptation** — 50-constituent universe, IST market-hours handling, rupee-denominated levels.
 - **Live data ingestion** via `yfinance`, replacing the paper's offline datasets.
@@ -22,21 +22,6 @@ Built on top of that by this team:
 - **A Flask dashboard** — live chart, decision card, indicator/pattern/trend panels, risk radar.
 - **An offline backtester** with equity curve, win rate, profit factor and OLS R².
 - **An OLS-vs-LLM price-prediction comparison**, scored live and over the backtest.
-
-This was a four-person final-year group project for the KIIT Application Development Lab.
-
----
-
-## Team
-
-| Contributor | Owned |
-|---|---|
-| Aryan Nalini | Orchestrator, Flask API, dashboard |
-| _add name_ | IndicatorAgent, PatternAgent |
-| _add name_ | TrendAgent, chart generation |
-| _add name_ | RiskAgent, DecisionAgent, backtester |
-
-<!-- Replace the placeholder rows with the real names and ownership split. -->
 
 ---
 
